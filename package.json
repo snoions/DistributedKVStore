@@ -1,0 +1,24 @@
+{
+  "name": "cse138_assignment4",
+  "version": "1.0.0",
+  "description": "- how to run npm in docker: https://nodejs.org/en/docs/guides/nodejs-docker-webapp/",
+  "main": "server.js",
+  "dependencies": {
+    "axios": "^0.21.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node js/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yguo57/CSE138_Assignment4.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yguo57/CSE138_Assignment4/issues"
+  },
+  "homepage": "https://github.com/yguo57/CSE138_Assignment4#readme"
+}
