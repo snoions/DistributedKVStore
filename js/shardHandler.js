@@ -1,10 +1,20 @@
 const util = require("./util.js")
 const axios = require('axios');
 module.exports =  class ShardHandler{
-    constructor(shard_count){
+    constructor(shard_count, view, store){
         this.shard_count = shard_count;
-        this.shardIds = [];
-        this.myShard = -1;
+        this.viewHandler = view;
+        this.storeHandler = store;
+        this.shardIds = []; //[0,..,shard_count-1]
+        for (var i =0; i< shard_count; i++){
+            this.shardIds.push(i);
+        }
+        var j;
+        for (j=0; j<this.viewHandler.view.length; j++){
+            if (this.viewHandler.socket_address == this.viewHandler.view[j])
+                break;
+        }
+        this.myShard = j % shard_count;
 	}
 
     handleReq(func, shard_id, method, sendRes){
@@ -39,6 +49,7 @@ module.exports =  class ShardHandler{
 	    let resJSON = {}
         console.log("GET node shard id");
         resJSON['statusCode'] = 200
+
         resJSON['body'] = {message:"Shard ID of the node retrieved successfully", shard-id: this.myShard}
         return resJSON
 	}
@@ -47,7 +58,12 @@ module.exports =  class ShardHandler{
         let resJSON = {}
         console.log("GET node shard id");
         resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Members of shard ID retrieved successfully", shard-id-members: []}
+        var members = []
+        for (var j=0; j<this.viewHandler.view.length; j++){
+            if (j %  this.shard_count == shard_id)
+                members.push(this.viewHandler.view[j])
+        }
+        resJSON['body'] = {message:"Members of shard ID retrieved successfully", shard-id-members: members}
         return resJSON
     }
 
@@ -55,7 +71,8 @@ module.exports =  class ShardHandler{
         let resJSON = {}
         console.log("GET node shard id");
         resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Key count of shard ID retrieved successfully",shard-id-key-count:-1}
+        var count = Object.keys(this.storeHandler.kvstore).length;
+        resJSON['body'] = {message:"Key count of shard ID retrieved successfully",shard-id-key-count:count}
         return resJSON
     }
 
@@ -108,7 +125,7 @@ module.exports =  class ShardHandler{
 				} else if (error.request) {
 					// The request was made but no response was received
 					console.log("no response from ", address);
-					if (count==this.crash_threshhold){
+					if (count==this.crash_threshold){
 						console.log(address+" crashed")
 						this.view = this.view.filter(a => a!=address ) 
 						this.broadcast('key-value-store-view', 'DELETE', {"socket-address": address})  //broadcast to delete the crashed node

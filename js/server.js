@@ -3,7 +3,7 @@ const axios = require('axios');
 const util = require('./util.js')
 const hostname = '0.0.0.0';
 const port = 8085;
-const crash_threshhold = 1;
+const crash_threshold = 1;
 
 var kvstore = {}
 
@@ -23,9 +23,9 @@ const shard_count = process.env.SHARD_COUNT
 const StoreHandler = require('./storeHandler.js');
 const ViewHandler = require('./viewHandler.js');
 const ShardHandler = require('./shardHandler.js');
-const viewHandler = new ViewHandler(view, socket_address, crash_threshhold);
+const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
 const storeHandler = new StoreHandler(kvstore, viewHandler, index);
-const shardHandler = new ShardHandler(shard_count);
+const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
