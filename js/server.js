@@ -7,8 +7,8 @@ const crash_threshhold = 1;
 
 var kvstore = {}
 
-if (!process.env.VIEW || !process.env.SOCKET_ADDRESS){
-  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS");
+if (!process.env.VIEW || !process.env.SOCKET_ADDRESS|| !process.env.SHARD_COUNT){
+  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS or SHARD_COUNT");
 }
 var view = process.env.VIEW.split(",")
 const socket_address = process.env.SOCKET_ADDRESS
@@ -18,11 +18,14 @@ for (index=0; index<view.length; index++){
         break;
     }
 }
+const shard_count = process.env.SHARD_COUNT
 
 const StoreHandler = require('./storeHandler.js');
 const ViewHandler = require('./viewHandler.js');
-const viewHandler = new ViewHandler(view, socket_address, crash_threshhold)
+const ShardHandler = require('./shardHandler.js');
+const viewHandler = new ViewHandler(view, socket_address, crash_threshhold);
 const storeHandler = new StoreHandler(kvstore, viewHandler, index);
+const shardHandler = new ShardHandler(shard_count);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
@@ -51,12 +54,25 @@ const server = http.createServer((req, res) => {
     if(urlComponents.length>2 && urlComponents[1]=="key-value-store"){
       let key = urlComponents[2];
       storeHandler.handleReq(key, dataJSON, req.method, sendRes);
-    }else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-view"){
+    }
+    else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-view"){
       let address = dataJSON['socket-address'];
       viewHandler.handleReq(address, req.method, sendRes);
     }
     else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-all" && req.method=="GET"){
       storeHandler.handleGetAll(sendRes);
+    }
+    else if (urlComponents.length>2 && urlComponents[1]=="key-value-store-shard"){
+        //if the length == 2, then its either get shard_id or node_shard_id
+            //put: reshard
+        //if lenght == 3, then its get shard_id_members, get shard-id-key-count
+            //put: add member
+        let shard_id = -1;
+        let func = urlComponents[2];
+        if (urlComponents.length == 3){
+            shard_id = parseInt(urlComponents[3]);
+        }
+        shardHandler.handleReq(func, shard_id, req.method,sendRes);
     }
 
   });
