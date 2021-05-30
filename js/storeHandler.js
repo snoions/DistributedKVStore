@@ -1,121 +1,11 @@
 const util = require('./util.js')
-
 module.exports =  class StoreHandler{
-
-
-	constructor(kvstore, viewHandler, index){
+	constructor(kvstore, viewHandler){
 		this.kvstore = kvstore;
-		this.viewHandler = viewHandler
-		this.delayed_reqs = []  //store requests that are not yet deliverable (waiting for requests that happened before )
-		this.cur_VC = []  //point-wise maximum of of all delivered VCs, decides if a new request is deliverable
-		var len = this.viewHandler.view.length
-		for (var i =0; i<len; i++){
-		    this.cur_VC.push(0)
-		}
-		this.index = index //this is the index this replica is represented in the VC
-	}	
-
-
-	async handleReq(key, dataJSON, method, sendRes){
-		let metadata = dataJSON['causal-metadata']
-		let resJSON = {}
-		if(!this.deliverable(metadata) && util.partiallyGreater(metadata['VC'], this.cur_VC))
-			await this.gossiping() //get update-to-date kv pairs from other replicas
-		if(this.deliverable(metadata)){
-			if('broadcasted' in dataJSON && dataJSON['broadcasted']){
-			    console.log('broadcasting...')
-				resJSON = this.handleBroadcastedReq(key, dataJSON, method)
-			}
-			else if(method =="GET") {
-				resJSON = this.handleGet(key, dataJSON);
-			}else if(method =="PUT"){
-				resJSON = this.handlePut(key,dataJSON);
-			}	
-			else if (method =='DELETE'){
-				resJSON = this.handleDelete(key,dataJSON);
-			}
-			sendRes(resJSON);
-			/*
-			if(method !="GET"){
-				this.checkDelayedReqs();
-			}*/
-		}else{
-			/*
-			if('broadcasted' in dataJSON && dataJSON['broadcasted']){
-				this.delayed_reqs.push({key:key, dataJSON:dataJSON, method:method, sendRes:sendRes})*/
-			//else{
-			resJSON['statusCode'] = 503
-			resJSON['body'] = {message: "metadata error", error: "message currently not deliverable", 'causal-metadata': metadata,
-							'currVC':this.cur_VC , 'index': this.index}
-			sendRes(resJSON);
-			//}
-		}
-
-	}
-
-	async gossiping(){
-		console.log("gossiping to get up-to-date kv pairs")
-		await this.viewHandler.sequentialBroadcast("key-value-store-all", "GET", {}, (response) => {
-			if(response.status==200){
-				let {kvstore, cur_VC} = response.data
-				console.log("gossiping succeeded, replica VC=", cur_VC)
-				if(util.partiallyGreater(cur_VC, this.cur_VC)){
-				  for (let [key, entry] of Object.entries(kvstore)){
-					let VC = entry['VC']
-					if (util.partiallyGreater(VC, this.cur_VC)){
-					  this.kvstore[key] = entry
-					  console.log("in gossip, key",key, "updated to",entry)
-					}
-				  }
-				}
-				this.cur_VC = util.pntwiseMax( this.cur_VC , cur_VC);
-			}else{
-			  console.log("gossiping error, response=", response.data )
-			}
-		})
-	}
-	/*
-	checkDelayedReqs(){
-		var cont = true
-		var i = 0
-		while (cont){
-			cont = false;
-			for (let {key, dataJSON, method, sendRes} in this.delayed_reqs){
-				let metadata = dataJSON['causal-metadata']
-				if (deliverable(metadata)){
-					let resJSON = handleBroadcastedReq(key, dataJSON, method)
-					sendRes(resJSON)
-					cont = true;
-				}
-			}
-		}
-	}*/
-
-	handleBroadcastedReq(key, dataJSON, method){
-		let {VC, index} = dataJSON['causal-metadata']
-		let resJSON = {}
-		if(method=="PUT"){
-			let value = dataJSON['value']
-			if(key in this.kvstore){
-				resJSON['statusCode'] = 200
-				resJSON['body'] = {message: "Updated successfully", replaced: true}
-			}
-			else {
-				resJSON['statusCode'] = 201
-				resJSON['body'] = {message: "Added successfully", replaced: false}
-			}
-			this.cur_VC[index]++ 
-			console.log("updated cur_VC",this.cur_VC)
-			this.kvstore[key] = {value:value, index:index, VC: VC}
-		}
-		if (method == "DELETE"){
-            resJSON['statusCode'] = 200
-            resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
-            delete this.kvstore[key]
-            this.cur_VC[index]++
-            console.log("updated cur_VC",this.cur_VC)
-		}
-		return resJSON
+		this.viewHandler = viewHandler;
+		this.delayed_reqs = [];  //store requests that are not yet deliverable (waiting for requests that happened before )
+		this.cur_VC = {};  //point-wise maximum of of all delivered VCs, decides if a new request is deliverable
+		this.client_count = 0;  //number of client
 	}
 
 	handleGetAll(sendRes){
@@ -126,34 +16,78 @@ module.exports =  class StoreHandler{
 		sendRes(resJSON);
 	}
 
+	handleReq(key, value, method, replicated, sendRes, metadata){
+		if (deliverable(metadata)){
+			this.handleDeliverableReq(key, value, method, replicated, sendRes, metadata)
+			let req_delivered=true
+			//see if any req in delayed_reqs can be delivered
+			while(req_delivered){
+				req_delivered=false
+				for (const req of delayed_reqs){
+					if(this.deliverable(req.metadata)){
+						this.handleDeliverableReq(req.key, req.value, req.method, req.replicated, req.sendRes, req.metadata)
+						req_delivered=true
+					}
+				}
+			}
+		}else{
+			this.delayed_reqs.push({key:key, value: value, method: method, replicated:replicated,, sendRes: sendRes, metadata: metadata})
+		}
+	}
 
-
- 	handleGet(key, dataJSON){
+	handleDeliverableReq(key, value, method, sendRes, metadata){
 		let resJSON = {}
-		let metadata = dataJSON['causal-metadata']
-		console.log("GET key="+key);
-		if(key in this.kvstore){
-			let {value, index, VC} = this.kvstore[key]
-			if (!metadata)
-				metadata = {VC: VC, index: index}
-			else
-				metadata = {VC: this.pointwiseMax(VC, metadata['VC']), index: index}
-			resJSON['statusCode'] = 200
-			resJSON['body'] = {doesExist: true, message: "Retrieved successfully", value: value,
-								'causal-metadata': metadata }
+		if(replicated){
+			resJSON = this.handleReplicated(key, value, method, metadata)
+		}else if(method =="GET") {
+			resJSON = this.handleGet(key, metadata);
+		}else if(method =="PUT"){
+			resJSON = this.handlePut(key,value, metadata);
 		}
-		else {
-			resJSON['statusCode'] = 404
-			resJSON['body'] = {doesExist: false, message: "Error in GET", error: "Key does not exist",
-								'causal-metadata': metadata }
+		else if (method =='DELETE'){
+			resJSON = this.handleDelete(key, metadata);
 		}
+		sendRes(resJSON);
+	}
 
+	handleReplicated(key, value, method, metadata){
+		let resJSON= {}
+	    if(method =="PUT"){
+			this.kvstore[key] = value
+			resJSON= {statusCode:200, msg: "PUT"+key+"="+value+" delivered"}
+		}
+		else if (method =='DELETE'){
+			delete this.kvstore[key]
+			resJSON= {statusCode:200, msg: "DELETE"+key+" delivered"}
+		}
+		else{
+			return {statusCode:400, msg: method+" not supported for replicated message"}
+		}
+		this.cur_VC[client_name] = Math.max(this.cur_VC[client_name], VC[client_name]);
 		return resJSON
 	}
 
-	handlePut(key, dataJSON){
-		let value = dataJSON['value'];
-		let metadata = dataJSON['causal-metadata']
+
+
+ 	handleGet(key, metadata){
+		let resJSON = {}
+		console.log("GET key="+key);
+		if(key in this.kvstore){
+			resJSON['statusCode'] = 200
+			resJSON['body'] = {doesExist: true, message: "Retrieved successfully", value: this.kvstore[key] }
+			if (!metadata)
+				metadata = new_client_metadata()
+			metadata['VC'] = util.pntwiseMax(metadata['VC'], this.cur_VC)
+		}
+		else {
+			resJSON['statusCode'] = 404
+			resJSON['body'] = {doesExist: false, message: "Error in GET", error: "Key does not exist" }
+		}
+		resJSON['causal-metadata'] = metadata
+		return resJSON
+	}
+
+	handlePut(key, value, metadata){
 		let resJSON = {}
 		console.log("PUT key="+key+", value="+value)
 		if (value===undefined){
@@ -164,151 +98,80 @@ module.exports =  class StoreHandler{
 			resJSON['statusCode'] = 400
 			resJSON['body'] = {message: "Error in PUT", error: "Key is too long" }
 		}
-        else {
-			if (!metadata){
-			    let vc = []
-            	var len = this.cur_VC.length
-                for (var i =0; i<len; i++){
-                    vc.push(0)
-                }
-		        metadata = {VC:vc, index:this.index}
-		    }
-			metadata['index'] = this.index
-            if(key in this.kvstore){
-                resJSON['statusCode'] = 200
-                resJSON['body'] = {message: "Updated successfully", replaced: true}
-            }
-            else {
-                resJSON['statusCode'] = 201
-                resJSON['body'] = {message: "Added successfully", replaced: false}
-            }
-			this.viewHandler.broadcast("key-value-store/"+key, "PUT", { 'causal-metadata': metadata, broadcasted:true, value:value }, (response) => {
-				console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
-			})
-			this.cur_VC[this.index] ++
-			metadata['VC'][this.index]= this.cur_VC[this.index]
-			this.kvstore[key] = {value:value, index: this.index, VC: this.cur_VC}
-			resJSON['body']['causal-metadata'] = metadata
-        }
+		else {
+			if(key in this.kvstore){
+				this.kvstore[key] = value
+				resJSON['statusCode'] = 200
+				resJSON['body'] = {message: "Updated successfully", replaced: true}
+			}
+			else {
+				this.kvstore[key] = value
+				resJSON['statusCode'] = 201
+				resJSON['body'] = {message: "Added successfully", replaced: false}
+			}
 
+			if (!metadata)
+				metadata = new_client_metadata()
+			this.viewHandler.broadcast("key-value-store", "PUT", {key:key, value:value, 'causal-metadata':metadata, replicated: true}, (response) => {
+			    console.log("replicate PUT to"+url+" succeded")
+			})
+			let {client_name , VC} = metadata
+			this.cur_VC[client_name] = Math.max(this.cur_VC[client_name], VC[client_name]);
+			VC[client_name]++;  //increment VC for the client's next response
+		}
+		resJSON['causal-metadata'] = metadata
 		return resJSON
 	}
 
-	handleDelete(key, dataJSON){
-		let metadata = dataJSON['causal-metadata']
+	handleDelete(key, metadata){
 		let resJSON = {}
 		console.log("DELETE key="+key);
-		if(key in this.kvstore == false){
-		    resJSON['statusCode'] = 404
-            resJSON['body'] = {doesExist: false, message: "Error in DELETE", error: "Key does not exist"}
+		if(key in this.kvstore){
+			resJSON['statusCode'] = 200
+			resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
+			delete this.kvstore[key]
+
+			if (!metadata)
+				metadata = new_client_metadata()
+			this.viewHandler.broadcast("key-value-store", "DELETE", {key:key, value:value, 'causal-metadata':metadata, replicated: true}, (response) => {
+			    console.log("replicate DELETE to"+url+" succeded")
+			})
+			let {client_name , VC} = metadata
+			this.cur_VC[client_name] = Math.max(this.cur_VC[client_name], VC[client_name]);
+			VC[client_name]++;  //increment VC for the client's next response
 		}
 		else {
-		    if (!metadata){
-		        let vc = []
-		        var len = this.cur_VC.length
-                for (var i =0; i<len; i++){
-                    vc.push(0)
-                }
-                metadata = {VC:vc, index:this.index}
-            }
-            metadata['index'] = this.index
-
-			resJSON['statusCode'] = 200
-            resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
-            delete this.kvstore[key]
-
-            this.viewHandler.broadcast("key-value-store/"+key, "DELETE", { 'causal-metadata': metadata, broadcasted:true}, (response) => {
-                console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
-            })
-            this.cur_VC[this.index] ++
-            metadata['VC'][this.index]= this.cur_VC[this.index]
-            resJSON['body']['causal-metadata'] = metadata
+			resJSON['statusCode'] = 404
+			resJSON['body'] = {doesExist: false, message: "Error in DELETE", error: "Key does not exist"}
 		}
+		resJSON['causal-metadata'] = metadata
 		return resJSON
 	}
 
-
-	deliverable (metadata){
-		if (!metadata)
-			return true
-		let {VC, index} = metadata
-		console.log("VC: ", VC, "cur_VC: ", this.cur_VC, 'index: ', index)
-		if (VC.length>this.cur_VC.length)
-			return false
-		for (let i =0;i<this.cur_VC.length;i++){
-			if (i == index && VC[i] != this.cur_VC[i]){
+	deliverable(metadata){
+		if(!metadata) //new client
+			return true;
+		let {client_name , VC} = metadata
+		for (const key in VC){
+			if (key == client_name && VC[key]==1)
+				continue;
+			if(!this.cur_VC[key])
 				return false
-			}else if (i!=index && VC[i]>this.cur_VC[i]){
+			if (key == client_name && VC[key] != this.cur_VC[key]+1)
 				return false
-			}
+			if (req_VC[key]>this.cur_VC[key])
+				return false
 		}
 		return true
 	}
 
-	pointwiseMax (arrA, arrB){
-		console.log("arrA:", arrA, "arrB:", arrB)
-		if(!arrA)
-			return arrB
-		if(!arrB)
-			return arrA
-	    var retArr= []
-	    for (var i =0; i<arrA.length; i++){
-	        if (arrA[i]>arrB[i]){
-	            retArr.push(arrA[i])
-	        }
-	        else{
-	            retArr.push(arrB[i])
-	        }
-	    }
-	    return retArr
+
+	new_client_metadata(){
+		let client_name = this.viewHandler.socket_address+ "_"+ this.client_count.toString()()
+		let VC = {}
+		VC[client_name] = 1;
+		this.client_count++;
+		return {client_name: client_name, VC: VC}
 	}
-
-    /*broadcast(m, key, value, metadata){
-        let replicas = this.viewHandler.view
-        //for (var i =0; i<replicas.length; i++){
-            let resJSON = {}
-            var address = replicas[1].split(':')
-            const options = {
-                hostname: address[0],
-                port: address[1],
-                path: '/key-value-store/'+key,
-                method: m,
-                headers: {
-                  'Content-Type': 'application/json',
-                }
-            }
-
-            console.log("Forwarding "+m+ " to "+replicas[1]+", method="+m+", key="+key+", value="+value)
-            const http = require('http');
-            const req = http.request(options, res => {
-                let data = ''
-                res.on('data', (chunk) => {
-                    data+=chunk;
-                })
-                res.on('end', () => {
-                    resJSON['statusCode'] = res.statusCode
-                    resJSON['body'] = JSON.parse(data)
-                    resJSON.update({'broadcasted':true})
-                    sendRes(resJSON)
-                })
-            })
-
-            req.on('error', error => {
-                resJSON['statusCode'] = 503
-                resJSON['body'] = {error: "Replica is down", message: 'Error in '+ m}
-                sendRes(resJSON)
-            })
-
-            if(value){
-                const reqJSON = {value: value};
-                req.write(JSON.stringify(reqJSON));
-            }
-            req.end()
-
-            //if (i+1 == this.index){
-            //    i++;
-            //}
-        //}
-    }*/
 
 };
