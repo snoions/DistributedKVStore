@@ -7,25 +7,22 @@ const crash_threshold = 1;
 
 var kvstore = {}
 
-if (!process.env.VIEW || !process.env.SOCKET_ADDRESS|| !process.env.SHARD_COUNT){
-  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS or SHARD_COUNT");
+if (!process.env.VIEW || !process.env.SOCKET_ADDRESS){
+  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS");
 }
 var view = process.env.VIEW.split(",")
 const socket_address = process.env.SOCKET_ADDRESS
-var index = 0
-for (index=0; index<view.length; index++){
-    if (view[index] == socket_address){
-        break;
-    }
-}
-const shard_count = process.env.SHARD_COUNT
+const shard_count = 0
+if (process.env.SHARD_COUNT)
+    shard_count = process.env.SHARD_COUNT
 
 const StoreHandler = require('./storeHandler.js');
 const ViewHandler = require('./viewHandler.js');
 const ShardHandler = require('./shardHandler.js');
 const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
-const storeHandler = new StoreHandler(kvstore, viewHandler, index);
-const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
+const storeHandler = new StoreHandler(kvstore, viewHandler);
+console.log("\nviewHandler.view: "+viewHandler.view+"\n")
+const shardHandler = new ShardHandler(shard_count, view, storeHandler);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
@@ -69,10 +66,13 @@ const server = http.createServer((req, res) => {
             //put: add member
         let shard_id = -1;
         let func = urlComponents[2];
-        if (urlComponents.length == 3){
+        console.log("components length: "+ urlComponents.length+ "url: "+ urlComponents)
+        if (urlComponents.length >= 3){
             shard_id = parseInt(urlComponents[3]);
         }
-        shardHandler.handleReq(func, shard_id, req.method,sendRes);
+        var d = dataJSON["socket-address"];
+        console.log("     data: "+d);
+        shardHandler.handleReq(func, shard_id, req.method, d, sendRes);
     }
 
   });

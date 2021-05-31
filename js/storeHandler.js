@@ -31,7 +31,7 @@ module.exports =  class StoreHandler{
 				}
 			}
 		}else{
-			this.delayed_reqs.push({key:key, value: value, method: method, replicated:replicated,, sendRes: sendRes, metadata: metadata})
+			this.delayed_reqs.push({key:key, value: value, method: method, replicated:replicated, sendRes: sendRes, metadata: metadata})
 		}
 	}
 

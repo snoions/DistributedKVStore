@@ -1,10 +1,10 @@
 const util = require("./util.js")
 const axios = require('axios');
 module.exports =  class ViewHandler{
-    constructor(view, socket_address, crash_threshhold){
+    constructor(view, socket_address, crash_threshold){
 		this.view = view;
 		this.socket_address = socket_address;
-        this.crash_threshhold = crash_threshhold;
+        this.crash_threshold = crash_threshold;
 	}
 
     handleReq(address, method, sendRes){
@@ -79,7 +79,7 @@ module.exports =  class ViewHandler{
                 } else if (error.request) {
                     // The request was made but no response was received
                     console.log("no response from ", address);
-                    if (count==this.crash_threshhold){
+                    if (count==this.crash_threshold){
                         console.log(address+" crashed")
                         this.view = this.view.filter(a => a!=address )
                         this.broadcast('key-value-store-view', 'DELETE', {"socket-address": address})  //broadcast to delete the crashed node
