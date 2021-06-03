@@ -48,9 +48,10 @@ const server = http.createServer((req, res) => {
         res.statusCode = resJSON.statusCode;
       res.end(JSON.stringify(resJSON.body));
     };
-
+    console.log("urlComponents: "+ urlComponents);
     if(urlComponents.length>2 && urlComponents[1]=="key-value-store"){
       let key = urlComponents[2];
+      console.log("gonna go to hadler")
       storeHandler.handleReq(key, dataJSON, req.method, sendRes);
     }
     else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-view"){
@@ -108,7 +109,8 @@ async function initializeReplica() {
         cont = false;
       })
   }*/
-  viewHandler.broadcastUntilSuccess( viewHandler.shard, "key-value-store-all", "GET", {}, (response) => {
+  let res = await shardHandler.handleGetIdMembers(shardHandler.myShard);
+  shardHandler.broadcastUntilSuccess( res['body']['shard-id-members'], "key-value-store-all", "GET", {}, (response) => {
     let {kvstore, cur_VC} = response.data
     console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
     //in case some put requests have already been delivered in this replica

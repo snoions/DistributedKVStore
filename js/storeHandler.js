@@ -21,9 +21,12 @@ module.exports =  class StoreHandler{
         }
         let metadata = dataJSON['causal-metadata']
         let resJSON = {}
+        console.log ("before gossiping")
         if(!this.deliverable(metadata) && util.partiallyGreater(metadata['VC'][this.shardHandler.shardID], this.cur_VC))
             await this.gossiping() //get update-to-date kv pairs from other replicas
-		if (deliverable(metadata)){
+		console.log("after gossiping");
+		if (this.deliverable(metadata)){
+		    console.log("deliverable")
 			if('broadcasted' in dataJSON && dataJSON['broadcasted']){
                 console.log('broadcasting...')
                 resJSON = this.handleBroadcastedReq(key, dataJSON, method)
@@ -39,6 +42,7 @@ module.exports =  class StoreHandler{
             sendRes(resJSON);
 		}
 		else{
+		    console.log("not deliverable")
 			resJSON['statusCode'] = 503
             resJSON['body'] = {message: "metadata error", error: "message currently not deliverable", 'causal-metadata': metadata,
                             'currVC':this.cur_VC }
@@ -49,7 +53,8 @@ module.exports =  class StoreHandler{
 
     async gossiping(){
         console.log("gossiping to get up-to-date kv pairs")
-        let shardMembers = this.shardHandler.handlerGetIdMembers(this.shardHandler.myShard)['body']['shard-id-members']
+        let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard)
+        let shardMembers = res['body']['shard-id-members']
         let promises = await shardMembers.map(async (address)=>{
             return await this.viewHandler.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
                 let {kvstore, cur_VC} = response.data
@@ -71,7 +76,8 @@ module.exports =  class StoreHandler{
 
 	async forwardToShard(key, method, data, sendRes){
         let shardID = this.shardHandler.keyToShardID(key);
-        let shard = this.shardHandler.handleGetIdMembers(shardID)['body']['shard-id-members'];
+        let res = await this.shardHandler.handleGetIdMembers(shardID);
+        let shard = res['body']['shard-id-members'];
         let resJSON = {}
         await this.shardHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, method, data, (response) => {
             console.log("forward to", response.config.url, " of shard", shardID , "succeeded, response=", response.data)
@@ -117,7 +123,7 @@ module.exports =  class StoreHandler{
 
     handleGetAll(sendRes){
         let resJSON = {}
-        console.log("GET all kv pairs");
+        console.log("GET all kv pairs cur_VC:",this.cur_VC);
         resJSON['statusCode'] = 200
         resJSON['body'] = {kvstore:this.kvstore, cur_VC:this.cur_VC}
         sendRes(resJSON);
@@ -169,10 +175,11 @@ module.exports =  class StoreHandler{
 				resJSON['body'] = {message: "Added successfully", replaced: false}
 			}
 			if (!metadata)
-				metadata = new_client_metadata()
+				metadata = this.new_client_metadata()
 
 			let {VC, client_name} = metadata
             let shardVC = VC[this.shardHandler.myShard]
+            console.log("shard_vc: "+ JSON.stringify(VC))
             this.cur_VC[client_name] = shardVC[client_name]
             this.kvstore[key] = {value:value, VC: shardVC}
 
@@ -181,6 +188,7 @@ module.exports =  class StoreHandler{
             })
             shardVC[client_name]++
             resJSON['body']['causal-metadata'] = metadata
+            resJSON['body']['shard-id'] = this.shardHandler.myShard
 		}
 		return resJSON
 	}
@@ -231,9 +239,10 @@ module.exports =  class StoreHandler{
     }
 
 	new_client_metadata(){
+	    console.log("in new_client_metadata function")
         let client_name = this.viewHandler.socket_address+ "_"+ String(this.client_count)
         let VC = {}
-        for(const shardID in this.shardHandler.handleGetIds()){
+        for(const shardID in this.shardHandler.handleGetIds()['body']['shard-ids']){
             VC[shardID]={}
             VC[shardID][client_name] = 1;
         }

@@ -257,16 +257,18 @@ class TestHW4(unittest.TestCase):
         print("\n###################### Putting keys/values to the store ######################\nThis takes awhile\n")
 
         for counter in range(self.keyCount):
+            print("counter: ",counter)
             nodeIndex = counter % len(nodeIpList)
-
+            print("url: ",('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter)))
             # put a new key in the store
             response = requests.put('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={'value': "value" + str(counter), "causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
+
             responseInJson = response.json()
             self.assertEqual(response.status_code, 201)
             self.causalMetadata = responseInJson["causal-metadata"]
 
             keyShardId = responseInJson["shard-id"]
-
+            print("keyShardId: ",keyShardId, " shard-id-list: ",self.shardIdList)
             self.assertTrue(keyShardId in self.shardIdList)
 
             print('.', end='', flush=True)
