@@ -68,6 +68,8 @@ module.exports =  class ViewHandler{
         let count = 1
         let retry = true
          while(retry){
+            if(count>1)
+                await new Promise(r => setTimeout(r, 500));  //sleep half a second before retry
             retry = false
             let url = "http://"+address+"/"+endpoint
             console.log("sending to "+url+ " attempt ", count)
@@ -79,16 +81,21 @@ module.exports =  class ViewHandler{
                 } else if (error.request) {
                     // The request was made but no response was received
                     console.log("no response from ", address);
-                    if (count==this.crash_threshold){
+                    if (count==this.crash_threshhold){
                         console.log(address+" crashed")
+                        //delete node in view and shardDict
                         this.view = this.view.filter(a => a!=address )
-                        this.broadcast('key-value-store-view', 'DELETE', {"socket-address": address})  //broadcast to delete the crashed node
+                        for (let shard of Object.values(this.shardDict)) {
+                            shard =shard.filter(a => a!=address )
+                        }
+
+                        this.broadcast('key-value-store-view', 'DELETE', {"socket-address": address})  //anounce to all replicas that a replica crashed
                     }else{
                         retry = true;
                         count++;
                     }
                 }else {
-                    console.log('Error', error.message);
+                    console.log('axios error', error);
                 }
 
             });

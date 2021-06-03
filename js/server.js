@@ -23,11 +23,12 @@ const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
 const storeHandler = new StoreHandler(kvstore, viewHandler);
 console.log("\nviewHandler.view: "+viewHandler.view+"\n")
 const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
+storeHandler.setShardHandlerInstance(shardHandler);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
   res.setHeader('Content-Type', 'application/json');
-  res.statusCode = 406;
+  res.statusCode = 405;
   let resJSON = {}
   let urlComponents =req.url.split("/");
   urlComponents[urlComponents.length-1] =urlComponents[urlComponents.length-1].split("?")[0]   //strip querystring
@@ -90,6 +91,7 @@ async function initializeReplica() {
     console.log("broadcast to", response.config.url, "succeded, response=",response.data)
   })
 
+  /*
   //try to get kv-pairs from another replica. Stop the iteration when succeeds
   let cont = true
   const view_other = view.filter(address => address!=socket_address );
@@ -98,19 +100,19 @@ async function initializeReplica() {
       break;
     console.log("trying to get all kv-pairs from "+ address)
     await viewHandler.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
-        if(response.status==200){
-            let {kvstore, cur_VC} = response.data
-            console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
-            //in case some put requests have already been delivered in this replica
-            storeHandler.kvstore = {...kvstore}
-            storeHandler.cur_VC = storeHandler.pointwiseMax( storeHandler.cur_VC , cur_VC);
-            cont = false;
-        }else{
-          console.log("get all kv-pairs received error, response=", response.data )
-        }
+        let {kvstore, cur_VC} = response.data
+        console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
+        //in case some put requests have already been delivered in this replica
+        storeHandler.kvstore = {...kvstore}
+        storeHandler.cur_VC = util.pntwiseMax( storeHandler.cur_VC , cur_VC);
+        cont = false;
       })
-  }
+  }*/
+  viewHandler.broadcastUntilSuccess( viewHandler.shard, "key-value-store-all", "GET", {}, (response) => {
+    let {kvstore, cur_VC} = response.data
+    console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
+    //in case some put requests have already been delivered in this replica
+    storeHandler.kvstore = {...kvstore}
+    storeHandler.cur_VC = util.pntwiseMax( storeHandler.cur_VC , cur_VC);
+  })
 }
-
-
-
