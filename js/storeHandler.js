@@ -224,6 +224,7 @@ module.exports =  class StoreHandler{
 	}
 
 	deliverable (metadata){
+	    console.log("deliverable: metadata: "+JSON.stringify(metadata))
         if (!metadata)
             return true
         let {VC, client_name} = metadata

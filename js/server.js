@@ -68,8 +68,11 @@ const server = http.createServer((req, res) => {
         if (urlComponents.length >= 3){
             shard_id = parseInt(urlComponents[3]);
         }
-        var d = dataJSON["socket-address"];
-        console.log("     data: "+d);
+        var d;
+        if (dataJSON["socket-address"])
+            d = dataJSON["socket-address"]
+        if (dataJSON['shard-count'])
+            d = dataJSON['shard-count']
         shardHandler.handleReq(func, shard_id, req.method, d, sendRes);
     }
 

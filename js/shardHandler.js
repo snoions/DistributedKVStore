@@ -38,7 +38,7 @@ module.exports =  class ShardHandler{
 		    if (func == "add-member")
 		        resJSON = await this.handlePutMember(shard_id, data);
 		    else if (func == "reshard")
-		        resJSON = this.handlePutReshard(shard_id);
+		        resJSON = this.handlePutReshard(data);
 		    else if (func == "set-shard")
 		        resJSON = this.handlePutNodeShardId(shard_id);
 		    else if (func == "set-shard-count")
@@ -103,7 +103,8 @@ module.exports =  class ShardHandler{
         let resJSON = {}
         console.log("GET number of keys in a shard");
         resJSON['statusCode'] = 200
-        var nodesInShard = await handleGetIdMembers(shard_id)['body'];
+        let res = await this.handleGetIdMembers(shard_id);
+        var nodesInShard = res['body']['shard-id-members'];
         var tempView =[]
         for (var i =0; i<nodesInShard; i++){
             if (nodesInShard[i]!= this.viewHandler.socket_address)
@@ -147,11 +148,17 @@ module.exports =  class ShardHandler{
         return resJSON
 	}
 
-	handlePutReshard(shard_id){
+	handlePutReshard(shard_count){
 		let resJSON = {}
         console.log("PUT reshard");
-        resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Resharding done successfully"}
+        if (this.viewHandler.view.length/shard_count < 2){
+            resJSON['statusCode'] = 400
+            resJSON['body'] = {message:"Not enough nodes to provide fault-tolerance with the given shard count!"}
+        }
+        else{
+            resJSON['statusCode'] = 200
+            resJSON['body'] = {message:"Resharding done successfully"}
+        }
         return resJSON
 	}
 
