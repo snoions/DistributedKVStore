@@ -16,7 +16,7 @@ module.exports =  class ViewHandler{
 		}
 		else if (method =='DELETE'){
 			resJSON = this.handleDelete(address);
-		} 
+		}
 		sendRes(resJSON);
 	}
 

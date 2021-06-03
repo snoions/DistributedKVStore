@@ -194,7 +194,8 @@ class TestHW4(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         shard2Members = responseInJson['shard-id-members']
         self.assertGreater(len(shard2Members), 1)
-
+        print("shard1: ", shard1Members)
+        print("shard2: ",shard2Members)
         self.assertEqual(len(nodeSocketAddressList), len(shard1Members + shard2Members))
 
         self.shardsMemberList += [shard1Members]

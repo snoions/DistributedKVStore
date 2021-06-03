@@ -12,7 +12,7 @@ if (!process.env.VIEW || !process.env.SOCKET_ADDRESS){
 }
 var view = process.env.VIEW.split(",")
 const socket_address = process.env.SOCKET_ADDRESS
-const shard_count = 0
+var shard_count = -1
 if (process.env.SHARD_COUNT)
     shard_count = process.env.SHARD_COUNT
 
@@ -22,12 +22,12 @@ const ShardHandler = require('./shardHandler.js');
 const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
 const storeHandler = new StoreHandler(kvstore, viewHandler);
 console.log("\nviewHandler.view: "+viewHandler.view+"\n")
-const shardHandler = new ShardHandler(shard_count, view, storeHandler);
+const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
   res.setHeader('Content-Type', 'application/json');
-  res.statusCode = 405;
+  res.statusCode = 406;
   let resJSON = {}
   let urlComponents =req.url.split("/");
   urlComponents[urlComponents.length-1] =urlComponents[urlComponents.length-1].split("?")[0]   //strip querystring
@@ -60,10 +60,6 @@ const server = http.createServer((req, res) => {
       storeHandler.handleGetAll(sendRes);
     }
     else if (urlComponents.length>2 && urlComponents[1]=="key-value-store-shard"){
-        //if the length == 2, then its either get shard_id or node_shard_id
-            //put: reshard
-        //if lenght == 3, then its get shard_id_members, get shard-id-key-count
-            //put: add member
         let shard_id = -1;
         let func = urlComponents[2];
         console.log("components length: "+ urlComponents.length+ "url: "+ urlComponents)
@@ -95,7 +91,7 @@ async function initializeReplica() {
   })
 
   //try to get kv-pairs from another replica. Stop the iteration when succeeds
-  let cont = true    
+  let cont = true
   const view_other = view.filter(address => address!=socket_address );
   for (address of view_other) {
     if (!cont)
