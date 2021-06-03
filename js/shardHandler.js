@@ -76,7 +76,10 @@ module.exports =  class ShardHandler{
     }
 
     async handleGetIdMembersHelper(view, shard_id){
-        var members = [this.viewHandler.socket_address]
+        var members = []
+        if (this.myShard == shard_id){
+            members.push(this.viewHandler.socket_address)
+        }
         await Promise.all(view.map(obj =>
             axios.get("http://"+obj+"/key-value-store-shard/node-shard-id").then(res=>{
                 if (res.data['shard-id'] == shard_id){

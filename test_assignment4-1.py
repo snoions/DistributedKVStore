@@ -180,7 +180,8 @@ class TestHW4(unittest.TestCase):
 
         shard1 = str(self.shardIdList[0])
         shard2 = str(self.shardIdList[1])
-
+        print("shard1: ", shard1)
+        print("shard2: ",shard2)
         # get the members of shard1 from node2
         response = requests.get( 'http://localhost:8083/key-value-store-shard/shard-id-members/' + shard1, timeout=TIMEOUT)
         responseInJson = response.json()
