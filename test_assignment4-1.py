@@ -264,6 +264,7 @@ class TestHW4(unittest.TestCase):
             response = requests.put('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={'value': "value" + str(counter), "causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
 
             responseInJson = response.json()
+            print(response.status_code)
             self.assertEqual(response.status_code, 201)
             self.causalMetadata = responseInJson["causal-metadata"]
 

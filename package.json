@@ -4,9 +4,9 @@
   "description": "- how to run npm in docker: https://nodejs.org/en/docs/guides/nodejs-docker-webapp/",
   "main": "server.js",
   "dependencies": {
-    "axios": "^0.21.1"
+    "axios": "^0.21.1",
+    "string-hash": "^1.1.3"
   },
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node js/server.js"

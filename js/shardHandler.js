@@ -1,5 +1,7 @@
-const util = require("./util.js")
+const util = require("./util.js");
 const axios = require('axios');
+const stringHash = require('string-hash');
+
 module.exports =  class ShardHandler{
     constructor(shard_count, view, store){
         this.shard_count = shard_count;
@@ -185,10 +187,7 @@ module.exports =  class ShardHandler{
 	}
 
 	keyToShardID(key){
-        if (key[0] >= 'a' && key[0] < 'n')
-			return 0
-		else
-			return 1
+        return stringHash(key) % this.shard_count;
 	}
 
 	inThisShard(key){
