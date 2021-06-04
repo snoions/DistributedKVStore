@@ -257,19 +257,15 @@ class TestHW4(unittest.TestCase):
         print("\n###################### Putting keys/values to the store ######################\nThis takes awhile\n")
 
         for counter in range(self.keyCount):
-            print("counter: ",counter)
             nodeIndex = counter % len(nodeIpList)
-            print("url: ",('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter)))
             # put a new key in the store
             response = requests.put('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={'value': "value" + str(counter), "causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
 
             responseInJson = response.json()
-            print(response.status_code)
             self.assertEqual(response.status_code, 201)
             self.causalMetadata = responseInJson["causal-metadata"]
 
             keyShardId = responseInJson["shard-id"]
-            print("keyShardId: ",keyShardId, " shard-id-list: ",self.shardIdList)
             self.assertTrue(keyShardId in self.shardIdList)
 
             print('.', end='', flush=True)
@@ -283,12 +279,10 @@ class TestHW4(unittest.TestCase):
         nextCausalMetadata = ""
 
         for counter in range(self.keyCount):
-            print("counter: ",counter)
             nodeIndex = (counter + 1 ) % len(nodeIpList)
 
             # get the value of the key
             response = requests.get('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={"causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
-            print(response)
             responseInJson = response.json()
 
             self.assertEqual(response.status_code, 200)
@@ -318,6 +312,9 @@ class TestHW4(unittest.TestCase):
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard2KeyCount = int(responseInJson['shard-id-key-count'])
+
+        print("shard1keycount: ", shard1KeyCount)
+        print("shard2keycount: ", shard2KeyCount)
 
         # sum of key counts in shards == total keys
         self.assertEqual(self.keyCount, shard1KeyCount + shard2KeyCount)
@@ -387,7 +384,7 @@ class TestHW4(unittest.TestCase):
         responseInJson = response.json()
         self.assertEqual(response.status_code, 200)
         shard2KeyCountFromNode3 = int(responseInJson['shard-id-key-count'])
-
+        print(node7ShardId, shard2KeyCountFromNode7, shard2KeyCountFromNode3)
         self.assertEqual(shard2KeyCountFromNode7, shard2KeyCountFromNode3)
 
 

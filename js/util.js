@@ -15,15 +15,5 @@ const Util ={
 		return VC
 	},
 
-	//check if VC1 is greater than VC1 in at least one place
-	partiallyGreater: function (VC1, VC2){
-		for (const key in VC1){
-			if (!(key in VC2))
-				return true
-			else if (VC1[key]>VC2[key])
-				return true
-		}
-		return true
-	}
 }
 module.exports = Util;

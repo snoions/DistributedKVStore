@@ -107,28 +107,32 @@ module.exports =  class ShardHandler{
         resJSON['statusCode'] = 200
         let res = await this.handleGetIdMembers(shard_id);
         var nodesInShard = res['body']['shard-id-members'];
-        var tempView =[]
-        for (var i =0; i<nodesInShard; i++){
-            if (nodesInShard[i]!= this.viewHandler.socket_address)
-                tempView.push(nodesInShard[i])
-        }
-        var count = await this.handleGetShardKeyCountHelper(shard_id, tempView);
-        resJSON['body'] = {message:"Key count of shard ID retrieved successfully", "shard-id-key-count":count}
-        return resJSON
-    }
-
-    async handleGetShardKeyCountHelper(shard_id, nodesInShard){
         var count = 0;
         if (this.myShard == shard_id){
             count += Object.keys(this.storeHandler.kvstore).length;
+            if (count == 0){
+                for (var i =0; i<nodesInShard.length; i++){
+                    if (nodesInShard[i]!=this.viewHandler.socket_address){
+                        await axios.get("http://"+nodesInShard[i]+"/"+"key-value-store-all").then(res=>{
+                            var allKeys = res.data['kvstore']
+                            count+= Object.keys(allKeys).length
+                            console.log("adding to count: "+count)
+                        })
+                    }
+                    if (count>0)
+                        break;
+                }
+            }
         }
-        await Promise.all(nodesInShard.map(obj =>
-            axios.get("http://"+obj+"/"+"key-value-store-all").then(res=>{
+        else{
+            await axios.get("http://"+nodesInShard[0]+"/"+"key-value-store-all").then(res=>{
                 var allKeys = res.data['kvstore']
                 count+= Object.keys(allKeys).length
+                console.log("adding to count: "+count)
             })
-        ));
-        return count;
+        }
+        resJSON['body'] = {message:"Key count of shard ID retrieved successfully", "shard-id-key-count":count}
+        return resJSON
     }
 
 	async handlePutMember(shard_id, socket_address){
@@ -225,36 +229,4 @@ module.exports =  class ShardHandler{
 	    return this.myShard == this.keyToShardID(key);
 	}
 
-	async broadcastInThisShard(endpoint, method, data, thenFunc){
-	    let res = await this.handleGetIdMembers(this.myShard);
-	    let shardMembers = res['body']['shard-id-members']
-        const shard_others = shardMembers.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
-        console.log("in broadcastInThisShard, shard_others=", shard_others)
-        for (let address of shard_others) {
-            this.viewHandler.sendAndDetectCrash(address, endpoint, method, data, thenFunc)
-         }
-    }
-
-    //same as broadcast but sends are executed one by one
-    async sequentialBroadcast(endpoint, method, data, thenFunc){
-        let res = await this.handleGetIdMembers(this.myShard);
-        let shardMembers = res['body']['shard-id-members']
-        const shard_others = shardMembers.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
-        console.log("in broadcast, shard_others=", shard_others)
-        for (let address of shard_others) {
-            await this.viewHandler.sendAndDetectCrash(address, endpoint, method, data, thenFunc)
-         }
-    }
-
-    //broadcast to each address in the shard until success
-    async broadcastUntilSuccess(shard, endpoint, method, data, thenFunc){ // look into what exactly shard is
-        const shard_others = shard.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
-        console.log("in BroadcastUntilSuccess, shard_others=", shard_others)
-        let cont = true
-        for (let address of shard_others) {
-            if (!cont)
-               break;
-            await this.viewHandler.sendAndDetectCrash(address, endpoint, method, data, (response)=>{thenFunc(response);console.log("stop broadcast");cont=false})
-         }
-    }
 }

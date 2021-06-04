@@ -24,6 +24,7 @@ const storeHandler = new StoreHandler(kvstore, viewHandler);
 console.log("\nviewHandler.view: "+viewHandler.view+"\n")
 const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
 storeHandler.setShardHandlerInstance(shardHandler);
+viewHandler.setShardHandlerInstance(shardHandler);
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
@@ -95,23 +96,6 @@ async function initializeReplica() {
     console.log("broadcast to", response.config.url, "succeded, response=",response.data)
   })
 
-  /*
-  //try to get kv-pairs from another replica. Stop the iteration when succeeds
-  let cont = true
-  const view_other = view.filter(address => address!=socket_address );
-  for (address of view_other) {
-    if (!cont)
-      break;
-    console.log("trying to get all kv-pairs from "+ address)
-    await viewHandler.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
-        let {kvstore, cur_VC} = response.data
-        console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
-        //in case some put requests have already been delivered in this replica
-        storeHandler.kvstore = {...kvstore}
-        storeHandler.cur_VC = util.pntwiseMax( storeHandler.cur_VC , cur_VC);
-        cont = false;
-      })
-  }*/
   let res = await shardHandler.handleGetIdMembers(shardHandler.myShard);
   shardHandler.broadcastUntilSuccess( res['body']['shard-id-members'], "key-value-store-all", "GET", {}, (response) => {
     let {kvstore, cur_VC} = response.data

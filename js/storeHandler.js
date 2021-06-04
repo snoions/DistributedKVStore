@@ -9,47 +9,49 @@ module.exports =  class StoreHandler{
 		this.shardHandler;
 	}
 
-    setShardHandlerInstance(shardHandler){
+    async setShardHandlerInstance(shardHandler){
         this.shardHandler = shardHandler;
+        let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard);
+        let shard = res['body']['shard-id-members']
+        for( const shardID of shard){
+            this.cur_VC[shardID] = 0
+        }
     }
 
 	async handleReq(key, dataJSON, method, sendRes){
 		if(!(this.shardHandler.inThisShard(key))){
-            console.log("before forwardToShard")
             await this.forwardToShard(key, method,dataJSON, sendRes)
-            console.log("after forwardToShard")
             return;
         }
         let metadata = dataJSON['causal-metadata']
         let resJSON = {}
-        //console.log ("before gossiping")
-        if(!this.deliverable(metadata) && util.partiallyGreater(metadata['VC'][this.shardHandler.shardID], this.cur_VC))
+        let broadcastedFrom = dataJSON['broadcastedFrom']
+        if(!this.deliverable(metadata, broadcastedFrom))
             await this.gossiping() //get update-to-date kv pairs from other replicas
-		console.log("after gossiping");
-		if (this.deliverable(metadata)){
-		    //console.log("deliverable")
-			if('broadcasted' in dataJSON && dataJSON['broadcasted']){
-                console.log('broadcasting...')
+		if (this.deliverable(metadata, broadcastedFrom)){
+            if(broadcastedFrom){
+                console.log('broadcasted')
                 resJSON = this.handleBroadcastedReq(key, dataJSON, method)
             }
             else if(method =="GET") {
                 resJSON = this.handleGet(key, dataJSON);
-            }else if(method =="PUT"){
+            }
+            else if(method =="PUT"){
                 resJSON = this.handlePut(key,dataJSON);
             }
             else if (method =='DELETE'){
                 resJSON = this.handleDelete(key,dataJSON);
             }
             sendRes(resJSON);
-		}
-		else{
-		    //console.log("not deliverable")
-			resJSON['statusCode'] = 503
+        }
+        else{
+            resJSON['statusCode'] = 503
             resJSON['body'] = {message: "metadata error", error: "message currently not deliverable", 'causal-metadata': metadata,
                             'currVC':this.cur_VC }
             sendRes(resJSON);
-		}
-		console.log("updated cur_VC", this.cur_VC)
+        }
+        console.log("updated cur_VC", this.cur_VC)
+
 	}
 
     async gossiping(){
@@ -60,10 +62,10 @@ module.exports =  class StoreHandler{
             return await this.viewHandler.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
                 let {kvstore, cur_VC} = response.data
                 console.log("gossiping succeeded, replica VC=", cur_VC)
-                if(util.partiallyGreater(cur_VC, this.cur_VC)){
+                if(!(this.deliverable(cur_VC))){
                     for (let [key, entry] of Object.entries(kvstore)){
                         let VC = entry['VC']
-                        if (util.partiallyGreater(VC, this.cur_VC)){
+                        if (!(this.deliverable(VC))){
                             this.kvstore[key] = entry
                             console.log("in gossip, key",key, "updated to",entry)
                         }
@@ -76,13 +78,11 @@ module.exports =  class StoreHandler{
     }
 
 	async forwardToShard(key, method, data, sendRes){
-	    console.log("in forward to shard function")
         let shardID = this.shardHandler.keyToShardID(key);
         let res = await this.shardHandler.handleGetIdMembers(shardID);
         let shard = res['body']['shard-id-members'];
-        console.log ("members in shard: "+shard);
         let resJSON = {}
-        await this.shardHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, method, data, (response) => {
+        await this.viewHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, method, data, (response) => {
             console.log("forward to", response.config.url, " of shard", shardID , "succeeded, response=", response.data)
             resJSON['body'] = response.data
             resJSON['statusCode'] = response.status
@@ -98,8 +98,7 @@ module.exports =  class StoreHandler{
     }
 
     handleBroadcastedReq(key, dataJSON, method){
-        let {VC, client_name} = dataJSON['causal-metadata']
-        let shardVC = VC[this.shardHandler.myShard]
+        let VC = dataJSON['causal-metadata']
         let resJSON = {}
         if(method=="PUT"){
             let value = dataJSON['value']
@@ -116,11 +115,10 @@ module.exports =  class StoreHandler{
         if (method == "DELETE"){
             resJSON['statusCode'] = 200
             resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
-            this.kvstore[key]['value'] = {value:null, VC: VC}
+            this.kvstore[key] = {value:null, VC: VC}
+            console.log("deleted in broadcasted")
         }
-
-        this.cur_VC[client_name] = shardVC[client_name]
-
+        this.cur_VC = util.pntwiseMax(this.cur_VC , VC)
         return resJSON
     }
 
@@ -137,15 +135,11 @@ module.exports =  class StoreHandler{
 		let metadata = dataJSON['causal-metadata']
 		console.log("GET key="+key);
 		if(key in this.kvstore && this.kvstore[key]['value']!=null){
-			let {value, storeVC} = this.kvstore[key]
-            if (!metadata){
-                metadata = this.new_client_metadata()
-            }
-            let reqVC = metadata['VC']
-            reqVC[this.shardHandler.myShard] = util.pntwiseMax(storeVC, reqVC[this.shardHandler.myShard] )
+			let {value, VC} = this.kvstore[key]
+            VC =  util.pntwiseMax(VC, this.cur_VC)
             resJSON['statusCode'] = 200
             resJSON['body'] = {doesExist: true, message: "Retrieved successfully", value: value,
-                                'causal-metadata': metadata }
+                                'causal-metadata': VC }
 		}
 		else {
 			resJSON['statusCode'] = 404
@@ -157,7 +151,6 @@ module.exports =  class StoreHandler{
 
 	handlePut(key, dataJSON){
 	    let value = dataJSON['value'];
-        let metadata = dataJSON['causal-metadata']
 		let resJSON = {}
 		console.log("PUT key="+key+", value="+value)
 		if (value===undefined){
@@ -177,27 +170,21 @@ module.exports =  class StoreHandler{
 				resJSON['statusCode'] = 201
 				resJSON['body'] = {message: "Added successfully", replaced: false}
 			}
-			if (!metadata)
-				metadata = this.new_client_metadata()
+			this.increment_cur_address(this.cur_VC)
+            let VC = this.cur_VC
 
-			let {VC, client_name} = metadata
-            let shardVC = VC[this.shardHandler.myShard]
-            console.log("shard_vc: "+ JSON.stringify(VC))
-            this.cur_VC[client_name] = shardVC[client_name]
-            this.kvstore[key] = {value:value, VC: shardVC}
+            this.kvstore[key] = {value:value, VC: VC}
 
-            this.shardHandler.broadcastInThisShard("key-value-store/"+key, "PUT", { 'causal-metadata': metadata, broadcasted:true, value:value }, (response) => {
+            this.viewHandler.broadcastInThisShard("key-value-store/"+key, "PUT", { 'causal-metadata': VC, broadcastedFrom:this.viewHandler.socket_address, value:value }, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
-            shardVC[client_name]++
-            resJSON['body']['causal-metadata'] = metadata
+            resJSON['body']['causal-metadata'] = VC
             resJSON['body']['shard-id'] = this.shardHandler.myShard
 		}
 		return resJSON
 	}
 
 	handleDelete(key, dataJSON){
-	    let metadata = dataJSON['causal-metadata']
 		let resJSON = {}
 		console.log("DELETE key="+key);
 		if(key in this.kvstore == false|| this.kvstore[key]['value']==null){
@@ -208,51 +195,39 @@ module.exports =  class StoreHandler{
             resJSON['statusCode'] = 200
             resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
 
-            if (!metadata){
-                metadata = this.new_client_metadata()
-            }
-            let {VC, client_name} = metadata
-            let shardVC = VC[this.shardHandler.myShard]
-            this.cur_VC[client_name] = shardVC[client_name]
-            this.kvstore[key] = {value:null, VC: shardVC}
+            this.increment_cur_address(this.cur_VC)
+            let VC = this.cur_VC
 
-            this.shardHandler.broadcastInThisShard("key-value-store/"+key, "DELETE", { 'causal-metadata': metadata, broadcasted:true}, (response) => {
+            this.kvstore[key] = {value:null, VC: VC}
+
+            this.viewHandler.broadcastInThisShard("key-value-store/"+key, "DELETE", { 'causal-metadata': VC, broadcastedFrom:this.viewHandler.socket_address}, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
 
-            shardVC[client_name]++
-            resJSON['body']['causal-metadata'] = metadata
+            resJSON['body']['causal-metadata'] = VC
         }
         return resJSON
 	}
 
-	deliverable (metadata){
-	    console.log("deliverable: metadata: "+JSON.stringify(metadata))
-        if (!metadata)
-            return true
-        let {VC, client_name} = metadata
-        console.log("VC: ", VC, "cur_VC: ", this.cur_VC, 'client_name: ', client_name)
-        let shardVC = VC[this.shardHandler.myShard]
-        for (const key in shardVC){
-            if (key == client_name && shardVC[key] != this.cur_VC[key]+1)
+	async deliverable (VC, BroadCastedFrom){
+	    console.log("VC: ", VC, "cur_VC: ", this.cur_VC)
+	    let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard);
+        let shard = res['body']['shard-id-members']
+        for (const key in VC){
+            if(!(shard.includes(key)))
+                continue
+            if(key==BroadCastedFrom && VC[key]!=this.cur_VC[key]+1)
                 return false
-            if (key != client_name && shardVC[key]>this.cur_VC[key])
+            else if (!(key in this.cur_VC) )
+                return false
+            else if (VC[key]>this.cur_VC[key])
                 return false
         }
         return true
     }
 
-	new_client_metadata(){
-	    console.log("in new_client_metadata function")
-        let client_name = this.viewHandler.socket_address+ "_"+ String(this.client_count)
-        let VC = {}
-        for(const shardID in this.shardHandler.handleGetIds()['body']['shard-ids']){
-            VC[shardID]={}
-            VC[shardID][client_name] = 1;
-        }
-        this.client_count++;
-        return {client_name: client_name, VC: VC}
-    }
-
+    increment_cur_address(VC){
+		VC[this.viewHandler.socket_address]++
+	}
 
 };
