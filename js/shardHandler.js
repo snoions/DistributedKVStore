@@ -40,7 +40,7 @@ module.exports =  class ShardHandler{
 		    if (func == "add-member")
 		        resJSON = await this.handlePutMember(shard_id, data);
 		    else if (func == "reshard")
-		        resJSON = this.handlePutReshard(data);
+		        resJSON = await this.handlePutReshard(data);
 		    else if (func == "set-shard")
 		        resJSON = this.handlePutNodeShardId(shard_id);
 		    else if (func == "set-shard-count")
@@ -132,32 +132,57 @@ module.exports =  class ShardHandler{
     }
 
 	async handlePutMember(shard_id, socket_address){
-	    //send a request to the node at socket address
-	    //set myshard
-	    //set the shard count and shard ids -broadcast
 		let resJSON = {}
         console.log("PUT member in shard");
         await axios.put("http://"+socket_address+"/key-value-store-shard/set-shard/"+shard_id, {}).then(res=>{
             console.log(res.data.message);
-        })
-        if (shard_id > (this.shard_count-1)){
-            this.handlePutShardCount(shard_id);
-            this.viewHandler.broadcast("key-value-store-shard/set-shard-count/"+shard_id, "PUT", {}, (res) => {
-                console.log("broadcast of adding new member successful");
-            })
-        }
+        });
         resJSON['statusCode'] = 200
         return resJSON
 	}
 
-	handlePutReshard(shard_count){
+	async handlePutReshard(shard_count){
 		let resJSON = {}
         console.log("PUT reshard");
         if (this.viewHandler.view.length/shard_count < 2){
             resJSON['statusCode'] = 400
             resJSON['body'] = {message:"Not enough nodes to provide fault-tolerance with the given shard count!"}
+            return resJSON;
+        }
+        else if (shard_count== this.shard_count){
+            resJSON['statusCode'] = 200
+            resJSON['body'] = {message:"Resharding done successfully"}
+            return resJSON;
         }
         else{
+            this.handlePutShardCount(shard_count);
+            await this.viewHandler.broadcast("key-value-store-shard/set-shard-count/"+shard_count, "PUT", {}, (res) => {
+                console.log("broadcast of changing shard counts successful");
+            });
+            //iterate through all keys and recalculate what shards they belong to
+            for (var i =0; i<shard_count; i++){
+                let keysInShard = []
+                if (this.myShard == i){
+                    keysInShard.push(this.storeHandler.kvstore);
+                }
+                //broadcast in shard i get all keys
+                let res = await this.handleGetIdMembers(i);
+                let shard = res['body']['shard-id-members'];
+                await this.broadcastUntilSuccess(shard, "key-value-store-all", "GET", {}, (res) => {
+                    keysInShard.push(res.data['kvstore'])
+                });
+                //for each key, recalcuate hash and see if it has to move
+                for (var j =0; j<keysInShard.length; j++){
+                    let keys = Object.keys(keysInShard[j]);
+                    keys.forEach((key, index) => {
+                        console.log("key "+key+ " value "+ keysInShard[j][key]['value']);
+                        //recalculate
+                        //delete
+                        //put
+                    })
+                }
+            }
+
             resJSON['statusCode'] = 200
             resJSON['body'] = {message:"Resharding done successfully"}
         }
@@ -173,7 +198,7 @@ module.exports =  class ShardHandler{
         return resJSON
 	}
 
-	handlePutShardCount(shard_count){
+	handlePutShardCount(shard_count){ //recalculate the higher variables after shard_count changed
 	    let resJSON = {}
         console.log("PUT shard count");
         this.shard_count = shard_count+1;
@@ -181,6 +206,12 @@ module.exports =  class ShardHandler{
         for (var i =0; i<= shard_count; i++){
             this.shardIds.push(i);
         }
+        var j;
+        for (j=0; j<this.viewHandler.view.length; j++){
+            if (this.viewHandler.socket_address == this.viewHandler.view[j])
+                break
+        }
+        this.myShard = j % shard_count;
         resJSON['statusCode'] = 200
         resJSON['body'] = {message:"Shard ID of the node put successfully"}
         return resJSON
@@ -197,7 +228,7 @@ module.exports =  class ShardHandler{
 	async broadcastInThisShard(endpoint, method, data, thenFunc){
 	    let res = await this.handleGetIdMembers(this.myShard);
 	    let shardMembers = res['body']['shard-id-members']
-        const shard_others = shardMembers.filter(address => address!=this.socket_address );  //other replicas in the shard
+        const shard_others = shardMembers.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
         console.log("in broadcastInThisShard, shard_others=", shard_others)
         for (let address of shard_others) {
             this.viewHandler.sendAndDetectCrash(address, endpoint, method, data, thenFunc)
@@ -208,7 +239,7 @@ module.exports =  class ShardHandler{
     async sequentialBroadcast(endpoint, method, data, thenFunc){
         let res = await this.handleGetIdMembers(this.myShard);
         let shardMembers = res['body']['shard-id-members']
-        const shard_others = shardMembers.filter(address => address!=this.socket_address );  //other replicas in the shard
+        const shard_others = shardMembers.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
         console.log("in broadcast, shard_others=", shard_others)
         for (let address of shard_others) {
             await this.viewHandler.sendAndDetectCrash(address, endpoint, method, data, thenFunc)
@@ -217,7 +248,7 @@ module.exports =  class ShardHandler{
 
     //broadcast to each address in the shard until success
     async broadcastUntilSuccess(shard, endpoint, method, data, thenFunc){ // look into what exactly shard is
-        const shard_others = shard.filter(address => address!=this.socket_address );  //other replicas in the shard
+        const shard_others = shard.filter(address => address!=this.viewHandler.socket_address );  //other replicas in the shard
         console.log("in BroadcastUntilSuccess, shard_others=", shard_others)
         let cont = true
         for (let address of shard_others) {

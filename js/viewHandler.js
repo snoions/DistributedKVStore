@@ -77,6 +77,7 @@ module.exports =  class ViewHandler{
             .then (thenFunc)
             .catch((error) => {
                 if (error.response) {
+                    thenFunc(error.response)
                     console.log("Response error", {statusCode: error.response.status, data: error.response.data, url:  url});
                 } else if (error.request) {
                     // The request was made but no response was received

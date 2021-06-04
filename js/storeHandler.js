@@ -80,6 +80,7 @@ module.exports =  class StoreHandler{
         let shardID = this.shardHandler.keyToShardID(key);
         let res = await this.shardHandler.handleGetIdMembers(shardID);
         let shard = res['body']['shard-id-members'];
+        console.log ("members in shard: "+shard);
         let resJSON = {}
         await this.shardHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, method, data, (response) => {
             console.log("forward to", response.config.url, " of shard", shardID , "succeeded, response=", response.data)
