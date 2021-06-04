@@ -69,6 +69,14 @@ module.exports =  class ViewHandler{
          }
     }
 
+    async broadcastSequential(endpoint, method, data, thenFunc){
+        const view_other = this.view.filter(address => address!=this.socket_address );  //view excluding the address of the current replica
+        console.log("in broadcast, view_other=", view_other)
+        for (let address of view_other) {
+            await this.sendAndDetectCrash(address, endpoint, method, data, thenFunc)
+         }
+    }
+
     async broadcastInThisShard(endpoint, method, data, thenFunc){
         let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard);
         let shard = res['body']['shard-id-members']

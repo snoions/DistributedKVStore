@@ -160,11 +160,42 @@ module.exports =  class ShardHandler{
         }
         else{
             this.handlePutShardCount(shard_count);
-            await this.viewHandler.broadcast("key-value-store-shard/set-shard-count/"+shard_count, "PUT", {}, (res) => {
+            await this.viewHandler.broadcastSequential("key-value-store-shard/set-shard-count/"+shard_count, "PUT", {}, (res) => {
                 console.log("broadcast of changing shard counts successful");
             });
+            console.log("after first broadcast")
+            /*for (var i = 0; i< this.viewHandler.view.length; i++){
+                let address = this.viewHandler.view[i];
+                let kvstore;
+                console.log("before get all")
+                await axios.get("http://"+address+"/"+"key-value-store-all").then(res=>{
+                    kvstore = res.data['kvstore']
+                });
+                console.log("got key value struct from node")
+                let keys = Object.keys(kvstore);
+                for (var k =0; k<keys.length; k++){
+                    let key = keys[k]
+                    console.log("key "+key+ " value "+ kvstore[key]['value']);
+
+                    await axios.delete("http://"+address+"/"+"key-value-store/"+key).then(res=>{
+                        console.log("reshard: deleted key in shard")
+                    });
+
+                    //let resTemp = await this.handleGetIdMembers(this.keyToShardID(key));
+                    //let newShard = resTemp['body']['shard-id-members']
+                    await axios.put("http://"+address+"/"+"key-value-store/"+key, {'value':kvstore[key]['value'], 'causal-metadata':""}).then(res=>{
+                        console.log("reshard: added back to correct shard")
+                    });
+
+                    //recalculate
+                    //delete
+                    //put
+                }
+
+            }*/
+
             //iterate through all keys and recalculate what shards they belong to
-            for (var i =0; i<shard_count; i++){
+            /*for (var i =0; i<shard_count; i++){
                 let keysInShard = []
                 if (this.myShard == i){
                     keysInShard.push(this.storeHandler.kvstore);
@@ -172,20 +203,33 @@ module.exports =  class ShardHandler{
                 //broadcast in shard i get all keys
                 let res = await this.handleGetIdMembers(i);
                 let shard = res['body']['shard-id-members'];
-                await this.broadcastUntilSuccess(shard, "key-value-store-all", "GET", {}, (res) => {
+                await this.viewHandler.broadcastUntilSuccess(shard, "key-value-store-all", "GET", {}, (res) => {
                     keysInShard.push(res.data['kvstore'])
                 });
                 //for each key, recalcuate hash and see if it has to move
                 for (var j =0; j<keysInShard.length; j++){
                     let keys = Object.keys(keysInShard[j]);
-                    keys.forEach((key, index) => {
+                    for (var k =0; k<keys.length; k++){
+                        let key = keys[k]
                         console.log("key "+key+ " value "+ keysInShard[j][key]['value']);
+                        if (this.keyToShardID(key)!=i){
+                            await this.viewHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, "DELETE",{},(res)=>{
+                                console.log("reshard: deleted key in shard")
+                            })
+
+                            let resTemp = await this.handleGetIdMembers(this.keyToShardID(key));
+                            let newShard = resTemp['body']['shard-id-members']
+                            await this.viewHandler.broadcastUntilSuccess(newShard, "key-value-store/"+key, "PUT", {'value':0, 'causal-metadata':""},
+                            (res)=>{
+                                console.log("reshard: added back to correct shard")
+                            })
+                        }
                         //recalculate
                         //delete
                         //put
-                    })
+                    }
                 }
-            }
+            }*/
 
             resJSON['statusCode'] = 200
             resJSON['body'] = {message:"Resharding done successfully"}
@@ -205,9 +249,9 @@ module.exports =  class ShardHandler{
 	handlePutShardCount(shard_count){ //recalculate the higher variables after shard_count changed
 	    let resJSON = {}
         console.log("PUT shard count");
-        this.shard_count = shard_count+1;
+        this.shard_count = shard_count;
         this.shardIds = [];
-        for (var i =0; i<= shard_count; i++){
+        for (var i =0; i< shard_count; i++){
             this.shardIds.push(i);
         }
         var j;
