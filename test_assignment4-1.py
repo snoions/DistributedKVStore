@@ -283,12 +283,14 @@ class TestHW4(unittest.TestCase):
         nextCausalMetadata = ""
 
         for counter in range(self.keyCount):
-
+            print("counter: ",counter)
             nodeIndex = (counter + 1 ) % len(nodeIpList)
 
             # get the value of the key
             response = requests.get('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={"causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
+            print(response)
             responseInJson = response.json()
+
             self.assertEqual(response.status_code, 200)
             value = responseInJson["value"]
             self.assertEqual(value, "value" + str(counter))

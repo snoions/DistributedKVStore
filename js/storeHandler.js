@@ -17,16 +17,17 @@ module.exports =  class StoreHandler{
 		if(!(this.shardHandler.inThisShard(key))){
             console.log("before forwardToShard")
             await this.forwardToShard(key, method,dataJSON, sendRes)
+            console.log("after forwardToShard")
             return;
         }
         let metadata = dataJSON['causal-metadata']
         let resJSON = {}
-        console.log ("before gossiping")
+        //console.log ("before gossiping")
         if(!this.deliverable(metadata) && util.partiallyGreater(metadata['VC'][this.shardHandler.shardID], this.cur_VC))
             await this.gossiping() //get update-to-date kv pairs from other replicas
 		console.log("after gossiping");
 		if (this.deliverable(metadata)){
-		    console.log("deliverable")
+		    //console.log("deliverable")
 			if('broadcasted' in dataJSON && dataJSON['broadcasted']){
                 console.log('broadcasting...')
                 resJSON = this.handleBroadcastedReq(key, dataJSON, method)
@@ -42,7 +43,7 @@ module.exports =  class StoreHandler{
             sendRes(resJSON);
 		}
 		else{
-		    console.log("not deliverable")
+		    //console.log("not deliverable")
 			resJSON['statusCode'] = 503
             resJSON['body'] = {message: "metadata error", error: "message currently not deliverable", 'causal-metadata': metadata,
                             'currVC':this.cur_VC }
@@ -75,6 +76,7 @@ module.exports =  class StoreHandler{
     }
 
 	async forwardToShard(key, method, data, sendRes){
+	    console.log("in forward to shard function")
         let shardID = this.shardHandler.keyToShardID(key);
         let res = await this.shardHandler.handleGetIdMembers(shardID);
         let shard = res['body']['shard-id-members'];

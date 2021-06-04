@@ -70,15 +70,15 @@ module.exports =  class ShardHandler{
     async handleGetIdMembers(shard_id){
         let resJSON = {}
         console.log("GET members in a shard id");
-        console.log("view: "+ this.viewHandler.view)
+        //console.log("view: "+ this.viewHandler.view)
         var tempView =[]
         for (var j=0; j<this.viewHandler.view.length; j++){
             if (this.viewHandler.view[j] != this.viewHandler.socket_address)
                 tempView.push(this.viewHandler.view[j])
         }
-        console.log("shardcount:"+ this.shard_count+" shard_id:"+shard_id)
+        //console.log("shardcount:"+ this.shard_count+" shard_id:"+shard_id)
         var members = await this.handleGetIdMembersHelper(tempView, shard_id);
-        console.log("members: "+ members);
+        //console.log("members: "+ members);
         //this.shardDict[shard_id] = members;
         resJSON['statusCode'] = 200
         resJSON['body'] = {message:"Members of shard ID retrieved successfully", "shard-id-members": members}
@@ -93,7 +93,7 @@ module.exports =  class ShardHandler{
         await Promise.all(view.map(obj =>
             axios.get("http://"+obj+"/key-value-store-shard/node-shard-id").then(res=>{
                 if (res.data['shard-id'] == shard_id){
-                    console.log("here is temp: "+res.data['socket-address']);
+                    //console.log("here is temp: "+res.data['socket-address']);
                     members.push(res.data['socket-address']);
                 }
             })

@@ -48,10 +48,10 @@ const server = http.createServer((req, res) => {
         res.statusCode = resJSON.statusCode;
       res.end(JSON.stringify(resJSON.body));
     };
-    console.log("urlComponents: "+ urlComponents);
+    //console.log("urlComponents: "+ urlComponents);
     if(urlComponents.length>2 && urlComponents[1]=="key-value-store"){
       let key = urlComponents[2];
-      console.log("gonna go to hadler")
+      //console.log("gonna go to hadler")
       storeHandler.handleReq(key, dataJSON, req.method, sendRes);
     }
     else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-view"){
