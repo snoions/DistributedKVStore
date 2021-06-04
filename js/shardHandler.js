@@ -3,26 +3,25 @@ const axios = require('axios');
 const stringHash = require('string-hash');
 
 module.exports =  class ShardHandler{
-    constructor(shard_count, view, store){
+    constructor(shard_count, view, store, messenger){
         this.shard_count = shard_count;
         this.viewHandler = view;
         //this.view = store.viewHandler.view;//view;
         this.storeHandler = store;
         //this.shardDict = {};
-        this.shardIds = []; //[0,..,shard_count-1]
-        for (var i =0; i< shard_count; i++){
-            this.shardIds.push(i);
-            //this.shardDict[i] = [];
-        }
-        var pos;
-        for (var j=0; j<this.viewHandler.view.length; j++){
-            if (this.viewHandler.socket_address == this.viewHandler.view[j])
-                pos = j;
-            //this.shardDict[j % shard_count].push(this.viewHandler.view[j])
-        }
-        this.myShard = -1;
-        if (shard_count!=-1)
-            this.myShard = pos % shard_count;
+        
+        this.shardDict = []
+        this.viewHandler.view.forEach((address, index )=> {
+            let shardID = index % shard_count
+            if (!this.shardDict[shardID]) this.shardDict[shardID]=[]
+            this.shardDict[shardID].push(address)
+            if (address==this.viewHandler.socket_address) this.myShardID= shardID
+        })
+        console.log("shardDict:", this.shardDict)
+
+        if (this.myShardID == undefined)
+            throw new Error("socket address", socket_address, " not in shard", shard); 
+        this.myShard = this.shardDict[this.myShardID]
 	}
 
     async handleReq(func, shard_id, method, data, sendRes){
@@ -41,10 +40,6 @@ module.exports =  class ShardHandler{
 		        resJSON = await this.handlePutMember(shard_id, data);
 		    else if (func == "reshard")
 		        resJSON = await this.handlePutReshard(data);
-		    else if (func == "set-shard")
-		        resJSON = this.handlePutNodeShardId(shard_id);
-		    else if (func == "set-shard-count")
-		        resJSON = this.handlePutShardCount(shard_id);
 		}
 		console.log("handled the request")
 		sendRes(resJSON);
@@ -54,7 +49,7 @@ module.exports =  class ShardHandler{
 		let resJSON = {}
 		console.log("GET shard id");
 		resJSON['statusCode'] = 200
-		resJSON['body'] = {message:"Shard IDs retrieved successfully", "shard-ids": this.shardIds}
+		resJSON['body'] = {message:"Shard IDs retrieved successfully", "shard-ids": Array.from(this.shardDict, (_, i) => i)}
 		return resJSON
 	}
 
@@ -62,7 +57,7 @@ module.exports =  class ShardHandler{
 	    let resJSON = {}
         console.log("GET node shard id");
         resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Shard ID of the node retrieved successfully", "shard-id": this.myShard,
+        resJSON['body'] = {message:"Shard ID of the node retrieved successfully", "shard-id": this.myShardID,
                             "socket-address":this.viewHandler.socket_address}
         return resJSON
 	}
@@ -70,77 +65,41 @@ module.exports =  class ShardHandler{
     async handleGetIdMembers(shard_id){
         let resJSON = {}
         console.log("GET members in a shard id");
-        //console.log("view: "+ this.viewHandler.view)
-        var tempView =[]
-        for (var j=0; j<this.viewHandler.view.length; j++){
-            if (this.viewHandler.view[j] != this.viewHandler.socket_address)
-                tempView.push(this.viewHandler.view[j])
-        }
-        //console.log("shardcount:"+ this.shard_count+" shard_id:"+shard_id)
-        var members = await this.handleGetIdMembersHelper(tempView, shard_id);
-        //console.log("members: "+ members);
-        //this.shardDict[shard_id] = members;
         resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Members of shard ID retrieved successfully", "shard-id-members": members}
+        resJSON['body'] = {message:"Members of shard ID retrieved successfully", "shard-id-members": this.shardDict[shard_id]}
         return resJSON
     }
 
-    async handleGetIdMembersHelper(view, shard_id){
-        var members = []
-        if (this.myShard == shard_id){
-            members.push(this.viewHandler.socket_address)
-        }
-        await Promise.all(view.map(obj =>
-            axios.get("http://"+obj+"/key-value-store-shard/node-shard-id").then(res=>{
-                if (res.data['shard-id'] == shard_id){
-                    //console.log("here is temp: "+res.data['socket-address']);
-                    members.push(res.data['socket-address']);
-                }
-            })
-        ));
-        return members;
-    }
 
     async handleGetShardKeyCount(shard_id){
         let resJSON = {}
         console.log("GET number of keys in a shard");
         resJSON['statusCode'] = 200
-        let res = await this.handleGetIdMembers(shard_id);
-        var nodesInShard = res['body']['shard-id-members'];
         var count = 0;
-        if (this.myShard == shard_id){
-            count += Object.keys(this.storeHandler.kvstore).length;
-            if (count == 0){
-                for (var i =0; i<nodesInShard.length; i++){
-                    if (nodesInShard[i]!=this.viewHandler.socket_address){
-                        await axios.get("http://"+nodesInShard[i]+"/"+"key-value-store-all").then(res=>{
-                            var allKeys = res.data['kvstore']
-                            count+= Object.keys(allKeys).length
-                            console.log("adding to count: "+count)
-                        })
-                    }
-                    if (count>0)
-                        break;
-                }
-            }
+        if (this.myShardID == shard_id){
+            await this.storeHandler.gossiping()
+            count = Object.keys(this.storeHandler.kvstore).length
         }
         else{
-            await axios.get("http://"+nodesInShard[0]+"/"+"key-value-store-all").then(res=>{
+            await axios.get("http://"+shardDict[shard_id][0]+"/"+"key-value-store-all").then(res=>{
                 var allKeys = res.data['kvstore']
-                count+= Object.keys(allKeys).length
-                console.log("adding to count: "+count)
+                count = Object.keys(allKeys).length
             })
         }
         resJSON['body'] = {message:"Key count of shard ID retrieved successfully", "shard-id-key-count":count}
         return resJSON
     }
 
-	async handlePutMember(shard_id, socket_address){
+	async handlePutMember(shard_id, data){
 		let resJSON = {}
         console.log("PUT member in shard");
-        await axios.put("http://"+socket_address+"/key-value-store-shard/set-shard/"+shard_id, {}).then(res=>{
-            console.log(res.data.message);
-        });
+        this.shardDict[shard_id].push(data['socket_address'])
+        if (!(data['broadcasted'])){
+            data = {...data, broadcasted:true}
+            await this.messenger.broadcast(this.viewHandler.view, "/key-value-store-shard/set-shard/"+shard_id, "PUT",data,  (res)=>{
+                console.log(res.data.message);
+            });
+        }
         resJSON['statusCode'] = 200
         return resJSON
 	}
@@ -234,34 +193,6 @@ module.exports =  class ShardHandler{
             resJSON['statusCode'] = 200
             resJSON['body'] = {message:"Resharding done successfully"}
         }
-        return resJSON
-	}
-
-	handlePutNodeShardId(shard_id){
-	    let resJSON = {}
-        console.log("PUT node shard id");
-        this.myShard = shard_id
-        resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Shard ID of the node put successfully"}
-        return resJSON
-	}
-
-	handlePutShardCount(shard_count){ //recalculate the higher variables after shard_count changed
-	    let resJSON = {}
-        console.log("PUT shard count");
-        this.shard_count = shard_count;
-        this.shardIds = [];
-        for (var i =0; i< shard_count; i++){
-            this.shardIds.push(i);
-        }
-        var j;
-        for (j=0; j<this.viewHandler.view.length; j++){
-            if (this.viewHandler.socket_address == this.viewHandler.view[j])
-                break
-        }
-        this.myShard = j % shard_count;
-        resJSON['statusCode'] = 200
-        resJSON['body'] = {message:"Shard ID of the node put successfully"}
         return resJSON
 	}
 

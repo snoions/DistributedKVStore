@@ -1,22 +1,14 @@
 const util = require('./util.js')
 module.exports =  class StoreHandler{
-	constructor(kvstore, viewHandler){
+	constructor(kvstore, viewHandler, shardHandler, messenger){
 		this.kvstore = kvstore;
 		this.viewHandler = viewHandler;
+        this.shardHandler = shardHandler
+        this.messenger = messenger
 		this.delayed_reqs = [];  //store requests that are not yet deliverable (waiting for requests that happened before )
 		this.cur_VC = {};  //point-wise maximum of of all delivered VCs, decides if a new request is deliverable
-		this.client_count = 0;  //number of client
-		this.shardHandler;
 	}
 
-    async setShardHandlerInstance(shardHandler){
-        this.shardHandler = shardHandler;
-        let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard);
-        let shard = res['body']['shard-id-members']
-        for( const shardID of shard){
-            this.cur_VC[shardID] = 0
-        }
-    }
 
 	async handleReq(key, dataJSON, method, sendRes){
 		if(!(this.shardHandler.inThisShard(key))){
@@ -56,10 +48,8 @@ module.exports =  class StoreHandler{
 
     async gossiping(){
         console.log("gossiping to get up-to-date kv pairs")
-        let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard)
-        let shardMembers = res['body']['shard-id-members']
-        let promises = await shardMembers.map(async (address)=>{
-            return await this.viewHandler.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
+        let promises = await this.shardHandler.myShard.map(async (address)=>{
+            return await this.messenger.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
                 let {kvstore, cur_VC} = response.data
                 console.log("gossiping succeeded, replica VC=", cur_VC)
                 if(!(this.deliverable(cur_VC))){
@@ -78,11 +68,8 @@ module.exports =  class StoreHandler{
     }
 
 	async forwardToShard(key, method, data, sendRes){
-        let shardID = this.shardHandler.keyToShardID(key);
-        let res = await this.shardHandler.handleGetIdMembers(shardID);
-        let shard = res['body']['shard-id-members'];
         let resJSON = {}
-        await this.viewHandler.broadcastUntilSuccess(shard, "key-value-store/"+key, method, data, (response) => {
+        await this.messenger.broadcastUntilSuccess(this.shardHandler.myShard, "key-value-store/"+key, method, data, (response) => {
             console.log("forward to", response.config.url, " of shard", shardID , "succeeded, response=", response.data)
             resJSON['body'] = response.data
             resJSON['statusCode'] = response.status
@@ -151,6 +138,7 @@ module.exports =  class StoreHandler{
 
 	handlePut(key, dataJSON){
 	    let value = dataJSON['value'];
+        let VC = dataJSON['causal-metadata']
 		let resJSON = {}
 		console.log("PUT key="+key+", value="+value)
 		if (value===undefined){
@@ -171,11 +159,11 @@ module.exports =  class StoreHandler{
 				resJSON['body'] = {message: "Added successfully", replaced: false}
 			}
 			this.increment_cur_address(this.cur_VC)
-            let VC = this.cur_VC
+            VC = util.pntwiseMax(this.cur_VC, VC)
 
             this.kvstore[key] = {value:value, VC: VC}
 
-            this.viewHandler.broadcastInThisShard("key-value-store/"+key, "PUT", { 'causal-metadata': VC, broadcastedFrom:this.viewHandler.socket_address, value:value }, (response) => {
+            this.messenger.broadcast(this.shardHandler.myShard,"key-value-store/"+key, "PUT", { 'causal-metadata': this.cur_VC, broadcastedFrom:this.viewHandler.socket_address, value:value }, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
             resJSON['body']['causal-metadata'] = VC
@@ -186,6 +174,7 @@ module.exports =  class StoreHandler{
 
 	handleDelete(key, dataJSON){
 		let resJSON = {}
+        let VC = dataJSON['causal-metadata']
 		console.log("DELETE key="+key);
 		if(key in this.kvstore == false|| this.kvstore[key]['value']==null){
             resJSON['statusCode'] = 404
@@ -196,11 +185,12 @@ module.exports =  class StoreHandler{
             resJSON['body'] = {doesExist: true, message: "Deleted successfully"}
 
             this.increment_cur_address(this.cur_VC)
-            let VC = this.cur_VC
+            VC = util.pntwiseMax(this.cur_VC, VC)
+
 
             this.kvstore[key] = {value:null, VC: VC}
 
-            this.viewHandler.broadcastInThisShard("key-value-store/"+key, "DELETE", { 'causal-metadata': VC, broadcastedFrom:this.viewHandler.socket_address}, (response) => {
+            this.messenger.broadcast(this.shardHandler.myShard, "key-value-store/"+key, "DELETE", { 'causal-metadata': this.cur_VC, broadcastedFrom:this.viewHandler.socket_address}, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
 
@@ -211,10 +201,8 @@ module.exports =  class StoreHandler{
 
 	async deliverable (VC, BroadCastedFrom){
 	    console.log("VC: ", VC, "cur_VC: ", this.cur_VC)
-	    let res = await this.shardHandler.handleGetIdMembers(this.shardHandler.myShard);
-        let shard = res['body']['shard-id-members']
         for (const key in VC){
-            if(!(shard.includes(key)))
+            if(!(this.shardHandler.myShard.includes(key)))
                 continue
             if(key==BroadCastedFrom && VC[key]!=this.cur_VC[key]+1)
                 return false

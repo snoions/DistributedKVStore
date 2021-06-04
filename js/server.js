@@ -19,12 +19,14 @@ if (process.env.SHARD_COUNT)
 const StoreHandler = require('./storeHandler.js');
 const ViewHandler = require('./viewHandler.js');
 const ShardHandler = require('./shardHandler.js');
+const Messenger = require('./messenger.js')
+const messenger = new Messenger();
 const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
-const storeHandler = new StoreHandler(kvstore, viewHandler);
-console.log("\nviewHandler.view: "+viewHandler.view+"\n")
-const shardHandler = new ShardHandler(shard_count, viewHandler, storeHandler);
-storeHandler.setShardHandlerInstance(shardHandler);
-viewHandler.setShardHandlerInstance(shardHandler);
+const shardHandler = new ShardHandler(shard_count, viewHandler, null, messenger);
+const storeHandler = new StoreHandler(kvstore, viewHandler,shardHandler, messenger);
+shardHandler.storeHandler = storeHandler
+messenger.setView(viewHandler.view)
+messenger.setShard(shardHandler.myShard)
 
 const server = http.createServer((req, res) => {
   console.log("incoming", req.method, "to",req.url)
@@ -69,12 +71,7 @@ const server = http.createServer((req, res) => {
         if (urlComponents.length >= 3){
             shard_id = parseInt(urlComponents[3]);
         }
-        var d;
-        if (dataJSON["socket-address"])
-            d = dataJSON["socket-address"]
-        if (dataJSON['shard-count'])
-            d = dataJSON['shard-count']
-        shardHandler.handleReq(func, shard_id, req.method, d, sendRes);
+        shardHandler.handleReq(func, shard_id, req.method, dataJSON, sendRes);
     }
 
   });
@@ -92,12 +89,11 @@ server.listen(port, hostname, () => {
 
 async function initializeReplica() {
   // broadcast its address to other replicas
-  viewHandler.broadcast("key-value-store-view", "PUT", {"socket-address":socket_address}, (response) => {
+  messenger.broadcast(viewHandler.view, "key-value-store-view", "PUT", {"socket-address":socket_address}, (response) => {
     console.log("broadcast to", response.config.url, "succeded, response=",response.data)
   })
 
-  let res = await shardHandler.handleGetIdMembers(shardHandler.myShard);
-  shardHandler.broadcastUntilSuccess( res['body']['shard-id-members'], "key-value-store-all", "GET", {}, (response) => {
+  messenger.broadcastUntilSuccess(shardHandler.myShard, shardHandler.myShard, "key-value-store-all", "GET", {}, (response) => {
     let {kvstore, cur_VC} = response.data
     console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
     //in case some put requests have already been delivered in this replica
