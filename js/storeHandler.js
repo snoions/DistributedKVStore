@@ -1,28 +1,30 @@
 const util = require('./util.js')
 module.exports =  class StoreHandler{
-	constructor(kvstore, viewHandler, shardHandler, messenger){
+	constructor(kvstore, viewState, messenger){
 		this.kvstore = kvstore;
-		this.viewHandler = viewHandler;
-        this.shardHandler = shardHandler
+		this.viewState = viewState;
         this.messenger = messenger
 		this.delayed_reqs = [];  //store requests that are not yet deliverable (waiting for requests that happened before )
-		this.cur_VC = {};  //point-wise maximum of of all delivered VCs, decides if a new request is deliverable
+        this.cur_VC = {}
+        for( const node of viewState.myShard){
+			this.cur_VC[node] = 0
+		}
+		this.shardHandler;
 	}
 
 
 	async handleReq(key, dataJSON, method, sendRes){
-		if(!(this.shardHandler.inThisShard(key))){
+		if(!(this.viewState.inThisShard(key))){
             await this.forwardToShard(key, method,dataJSON, sendRes)
             return;
         }
         let metadata = dataJSON['causal-metadata']
         let resJSON = {}
-        let broadcastedFrom = dataJSON['broadcastedFrom']
+        let broadcastedFrom = dataJSON['broadcasted-from']
         if(!this.deliverable(metadata, broadcastedFrom))
-            await this.gossiping() //get update-to-date kv pairs from other replicas
+            await this.gossip() //get update-to-date kv pairs from other replicas
 		if (this.deliverable(metadata, broadcastedFrom)){
             if(broadcastedFrom){
-                console.log('broadcasted')
                 resJSON = this.handleBroadcastedReq(key, dataJSON, method)
             }
             else if(method =="GET") {
@@ -46,9 +48,9 @@ module.exports =  class StoreHandler{
 
 	}
 
-    async gossiping(){
+    async gossip(){
         console.log("gossiping to get up-to-date kv pairs")
-        let promises = await this.shardHandler.myShard.map(async (address)=>{
+        let promises = await this.viewState.myShard.map(async (address)=>{
             return await this.messenger.sendAndDetectCrash(address, "key-value-store-all", "GET", {}, (response) => {
                 let {kvstore, cur_VC} = response.data
                 console.log("gossiping succeeded, replica VC=", cur_VC)
@@ -69,8 +71,9 @@ module.exports =  class StoreHandler{
 
 	async forwardToShard(key, method, data, sendRes){
         let resJSON = {}
-        await this.messenger.broadcastUntilSuccess(this.shardHandler.myShard, "key-value-store/"+key, method, data, (response) => {
-            console.log("forward to", response.config.url, " of shard", shardID , "succeeded, response=", response.data)
+        let shardID = this.viewState.keyToShardID(key)
+        await this.messenger.broadcastUntilSuccess(this.viewState.shardDict[shardID], "key-value-store/"+key, method, data, (response) => {
+            console.log("forward to", response.config.url, " of shard",shardID, "succeeded, response=", response.data)
             resJSON['body'] = response.data
             resJSON['statusCode'] = response.status
         })
@@ -109,7 +112,9 @@ module.exports =  class StoreHandler{
         return resJSON
     }
 
-    handleGetAll(sendRes){
+    async handleGetAll(dataJSON, sendRes){
+        if(dataJSON['gossip'])
+            await this.gossip()
         let resJSON = {}
         console.log("GET all kv pairs cur_VC:",this.cur_VC);
         resJSON['statusCode'] = 200
@@ -119,19 +124,19 @@ module.exports =  class StoreHandler{
 
  	handleGet(key, dataJSON){
 		let resJSON = {}
-		let metadata = dataJSON['causal-metadata']
+		let reqVC = dataJSON['causal-metadata']
 		console.log("GET key="+key);
 		if(key in this.kvstore && this.kvstore[key]['value']!=null){
 			let {value, VC} = this.kvstore[key]
-            VC =  util.pntwiseMax(VC, this.cur_VC)
+            reqVC =  util.pntwiseMax(VC, reqVC)
             resJSON['statusCode'] = 200
             resJSON['body'] = {doesExist: true, message: "Retrieved successfully", value: value,
-                                'causal-metadata': VC }
+                                'causal-metadata': reqVC }
 		}
 		else {
 			resJSON['statusCode'] = 404
             resJSON['body'] = {doesExist: false, message: "Error in GET", error: "Key does not exist",
-                                'causal-metadata': metadata }
+                                'causal-metadata': reqVC }
 		}
 		return resJSON
 	}
@@ -160,14 +165,14 @@ module.exports =  class StoreHandler{
 			}
 			this.increment_cur_address(this.cur_VC)
             VC = util.pntwiseMax(this.cur_VC, VC)
-
+            console.log("VC", VC)
             this.kvstore[key] = {value:value, VC: VC}
 
-            this.messenger.broadcast(this.shardHandler.myShard,"key-value-store/"+key, "PUT", { 'causal-metadata': this.cur_VC, broadcastedFrom:this.viewHandler.socket_address, value:value }, (response) => {
+            this.messenger.broadcast(this.viewState.myShard,"key-value-store/"+key, "PUT", { 'causal-metadata': VC, 'broadcasted-from':this.viewState.socket_address, value:value }, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
             resJSON['body']['causal-metadata'] = VC
-            resJSON['body']['shard-id'] = this.shardHandler.myShard
+            resJSON['body']['shard-id'] = this.viewState.myShardID
 		}
 		return resJSON
 	}
@@ -190,19 +195,20 @@ module.exports =  class StoreHandler{
 
             this.kvstore[key] = {value:null, VC: VC}
 
-            this.messenger.broadcast(this.shardHandler.myShard, "key-value-store/"+key, "DELETE", { 'causal-metadata': this.cur_VC, broadcastedFrom:this.viewHandler.socket_address}, (response) => {
+            this.messenger.broadcast(this.viewState.myShard, "key-value-store/"+key, "DELETE", { 'causal-metadata': VC, 'broadcasted-from':this.viewState.socket_address}, (response) => {
                 console.log("broadcast to", response.config.url, "succeeded, response=", response.data)
             })
 
             resJSON['body']['causal-metadata'] = VC
+            resJSON['body']['shard-id'] = this.viewState.myShardID
         }
         return resJSON
 	}
 
-	async deliverable (VC, BroadCastedFrom){
-	    console.log("VC: ", VC, "cur_VC: ", this.cur_VC)
+	deliverable (VC, BroadCastedFrom){
+	    //console.log("VC: ", VC, "cur_VC: ", this.cur_VC)
         for (const key in VC){
-            if(!(this.shardHandler.myShard.includes(key)))
+            if(!(this.viewState.myShard.includes(key)))
                 continue
             if(key==BroadCastedFrom && VC[key]!=this.cur_VC[key]+1)
                 return false
@@ -215,7 +221,7 @@ module.exports =  class StoreHandler{
     }
 
     increment_cur_address(VC){
-		VC[this.viewHandler.socket_address]++
+		VC[this.viewState.socket_address]++
 	}
 
 };

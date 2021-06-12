@@ -284,7 +284,7 @@ class TestHW4(unittest.TestCase):
             # get the value of the key
             response = requests.get('http://localhost:' + nodeHostPortList[nodeIndex] + '/key-value-store/key' + str(counter), json={"causal-metadata": self.causalMetadata}, timeout=TIMEOUT)
             responseInJson = response.json()
-
+            #print("response:", responseInJson, "from", nodeIndex )
             self.assertEqual(response.status_code, 200)
             value = responseInJson["value"]
             self.assertEqual(value, "value" + str(counter))
@@ -350,7 +350,9 @@ class TestHW4(unittest.TestCase):
         # get the new view from node1
         response = requests.get( 'http://localhost:8082/key-value-store-view', timeout=TIMEOUT)
         responseInJson = response.json()
+        print(responseInJson)
         self.assertEqual(response.status_code, 200)
+
         self.assertTrue(compareViews(responseInJson['view'], newView))
 
         print("\n###################### Assigning the new node to the second shard ######################\n")

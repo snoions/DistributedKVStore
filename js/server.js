@@ -3,33 +3,30 @@ const axios = require('axios');
 const util = require('./util.js')
 const hostname = '0.0.0.0';
 const port = 8085;
-const crash_threshold = 1;
+const crash_threshold = 3;
 
 var kvstore = {}
 
-if (!process.env.VIEW || !process.env.SOCKET_ADDRESS){
-  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS");
+if (!process.env.VIEW || !process.env.SOCKET_ADDRESS ){
+  throw new Error("missing environment variables VIEW or SOCKET_ADDRESS ");
 }
 var view = process.env.VIEW.split(",")
 const socket_address = process.env.SOCKET_ADDRESS
-var shard_count = -1
-if (process.env.SHARD_COUNT)
-    shard_count = process.env.SHARD_COUNT
+var shard_count = process.env.SHARD_COUNT
+
 
 const StoreHandler = require('./storeHandler.js');
 const ViewHandler = require('./viewHandler.js');
 const ShardHandler = require('./shardHandler.js');
 const Messenger = require('./messenger.js')
-const messenger = new Messenger();
-const viewHandler = new ViewHandler(view, socket_address, crash_threshold);
-const shardHandler = new ShardHandler(shard_count, viewHandler, null, messenger);
-const storeHandler = new StoreHandler(kvstore, viewHandler,shardHandler, messenger);
-shardHandler.storeHandler = storeHandler
-messenger.setView(viewHandler.view)
-messenger.setShard(shardHandler.myShard)
+const ViewState = require('./viewState.js')
+const viewState = new ViewState(view, socket_address, shard_count)
+const messenger = new Messenger(viewState, crash_threshold);
+const viewHandler = new ViewHandler(viewState, messenger);
+const storeHandler = new StoreHandler(kvstore, viewState, messenger);
+const shardHandler = new ShardHandler( viewState, storeHandler, messenger);
 
 const server = http.createServer((req, res) => {
-  console.log("incoming", req.method, "to",req.url)
   res.setHeader('Content-Type', 'application/json');
   res.statusCode = 405;
   let resJSON = {}
@@ -46,6 +43,7 @@ const server = http.createServer((req, res) => {
   	if (data)
         dataJSON = JSON.parse(data);
 
+    console.log("incoming", req.method, "to",req.url, ",data:", dataJSON)
     let sendRes = function(resJSON) {
       if (resJSON.statusCode)
         res.statusCode = resJSON.statusCode;
@@ -62,7 +60,7 @@ const server = http.createServer((req, res) => {
       viewHandler.handleReq(address, req.method, sendRes);
     }
     else if(urlComponents.length>1 && urlComponents[1]=="key-value-store-all" && req.method=="GET"){
-      storeHandler.handleGetAll(sendRes);
+       storeHandler.handleGetAll(dataJSON, sendRes);
     }
     else if (urlComponents.length>2 && urlComponents[1]=="key-value-store-shard"){
         let shard_id = -1;
@@ -89,11 +87,11 @@ server.listen(port, hostname, () => {
 
 async function initializeReplica() {
   // broadcast its address to other replicas
-  messenger.broadcast(viewHandler.view, "key-value-store-view", "PUT", {"socket-address":socket_address}, (response) => {
+  messenger.broadcast(viewState.view, "key-value-store-view", "PUT", {"socket-address":socket_address}, (response) => {
     console.log("broadcast to", response.config.url, "succeded, response=",response.data)
   })
 
-  messenger.broadcastUntilSuccess(shardHandler.myShard, shardHandler.myShard, "key-value-store-all", "GET", {}, (response) => {
+  messenger.broadcastUntilSuccess( viewState.myShard, "key-value-store-all", "GET", {}, (response) => {
     let {kvstore, cur_VC} = response.data
     console.log("get all kv-pairs succeeded, kvstore",kvstore,"cur_VC=",cur_VC )
     //in case some put requests have already been delivered in this replica

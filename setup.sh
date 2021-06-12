@@ -21,3 +21,13 @@ for i in ${!nodeIpList[@]};do
                 assignment4-img
 done
 
+# sleep 5
+# for i in {1..600}; do 
+#     port=${nodeHostPortList[${i}%6]}
+#     curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"value": "value" }'  127.0.0.1:${port}/key-value-store/key${i}
+# done
+# sleep 5
+# for i in {1..600}; do 
+#     port=${nodeHostPortList[${i}%6]}
+#     curl --request GET --header "Content-Type: application/json" --write-out "\n%{http_code}\n" 127.0.0.1:${port}/key-value-store/key${i}
+# done
