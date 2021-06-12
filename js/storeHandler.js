@@ -9,7 +9,6 @@ module.exports =  class StoreHandler{
         for( const node of viewState.myShard){
 			this.cur_VC[node] = 0
 		}
-		this.shardHandler;
 	}
 
 

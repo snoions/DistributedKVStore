@@ -21,13 +21,32 @@ for i in ${!nodeIpList[@]};do
                 assignment4-img
 done
 
-# sleep 5
-# for i in {1..600}; do 
-#     port=${nodeHostPortList[${i}%6]}
-#     curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"value": "value" }'  127.0.0.1:${port}/key-value-store/key${i}
-# done
-# sleep 5
-# for i in {1..600}; do 
-#     port=${nodeHostPortList[${i}%6]}
-#     curl --request GET --header "Content-Type: application/json" --write-out "\n%{http_code}\n" 127.0.0.1:${port}/key-value-store/key${i}
-# done
+
+test_add_member(){
+    docker run  --detach  --publish 8089:8085  --net=assignment4-net  --ip=10.10.0.8 --name=node6  -e SOCKET_ADDRESS=10.10.0.8:8085  -e VIEW=${nodeView[@]},10.10.0.8:8085  assignment4-img
+    curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"socket-address": "10.10.0.8:8085"}' http://localhost:8082/key-value-store-shard/add-member/1
+}
+
+test_possible_reshard(){
+    curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"shard-count": 3 }' http://127.0.0.1:8082/key-value-store-shard/reshard
+}
+test_impossible_reshard(){
+    curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"shard-count": 10 }' http://127.0.0.1:8082/key-value-store-shard/reshard
+}
+
+test_put_get(){
+    sleep 5
+    for i in {1..30}; do 
+        port=${nodeHostPortList[${i}%6]}
+        curl --request PUT --header "Content-Type: application/json" --write-out "\n%{http_code}\n" --data '{"value": "value" }'  127.0.0.1:${port}/key-value-store/key${i}
+    done
+    sleep 5
+    for i in {1..30}; do 
+        port=${nodeHostPortList[${i}%6]}
+        curl --request GET --header "Content-Type: application/json" --write-out "\n%{http_code}\n" 127.0.0.1:${port}/key-value-store/key${i}
+    done
+}
+
+test_put_get
+test_add_member
+test_possible_reshard

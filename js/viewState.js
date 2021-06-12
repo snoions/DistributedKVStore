@@ -7,21 +7,26 @@ module.exports =  class viewState{
         this.shard_count = shard_count
         this.socket_address = socket_address
         this.shardDict = {}
-        if (!shard_count)
-            return
-        view.forEach((address, index )=> {
+        this.myShard = []
+        if (shard_count)
+            this.assign_shards()
+        
+    }
+
+    assign_shards(){
+        this.shardDict = {}
+        this.myShard = []
+        this.view.forEach((address, index )=> {
             let shardID = index % this.shard_count
             if (!this.shardDict[shardID]) this.shardDict[shardID]=[]
             this.shardDict[shardID].push(address)
             if (address==this.socket_address) this.myShardID= shardID
         })
-        console.log("shardDict:", this.shardDict)
 
         if (this.myShardID == undefined)
             throw new Error("socket address", socket_address, " not in view", view); 
         this.myShard = this.shardDict[this.myShardID]
     }
-
 
 	keyToShardID(key){
         return jumphash(key,this.shard_count);
