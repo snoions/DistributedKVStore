@@ -29,7 +29,6 @@ const shardHandler = new ShardHandler( viewState, storeHandler, messenger);
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.statusCode = 405;
-  let resJSON = {}
   let urlComponents =req.url.split("/");
   urlComponents[urlComponents.length-1] =urlComponents[urlComponents.length-1].split("?")[0]   //strip querystring
 

@@ -1,4 +1,1 @@
-# CSE138_assignment4
-
-#citations
-https://www.npmjs.com/package/string-hash - used this for the hash function used for keys
+A distributed kv store with sharding as the final assignment for CSE 138 distrbuted systems.  
